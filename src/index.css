@@ -1,18 +1,120 @@
 @import url('https://rsms.me/inter/inter.css');
 
+/* Euchs brand palette */
 :root {
+  --color-ink-black-50: hsl(197.5 92.3% 94.9%);
+  --color-ink-black-100: hsl(196.6 92.2% 90%);
+  --color-ink-black-200: hsl(196.9 94.1% 80%);
+  --color-ink-black-300: hsl(196.8 93.5% 70%);
+  --color-ink-black-400: hsl(196.9 94.1% 60%);
+  --color-ink-black-500: hsl(197.1 93.7% 50%);
+  --color-ink-black-600: hsl(196.9 94.1% 40%);
+  --color-ink-black-700: hsl(196.8 93.5% 30%);
+  --color-ink-black-800: hsl(196.9 94.1% 20%);
+  --color-ink-black-900: hsl(196.6 92.2% 10%);
+  --color-ink-black-950: hsl(197.6 94.4% 7.1%);
+
+  --color-dark-teal-50: hsl(197.6 68% 95.1%);
+  --color-dark-teal-100: hsl(196.4 64.7% 90%);
+  --color-dark-teal-200: hsl(196.8 66.7% 80%);
+  --color-dark-teal-300: hsl(197.2 66% 70%);
+  --color-dark-teal-400: hsl(197 65.7% 60%);
+  --color-dark-teal-500: hsl(197 66.3% 50%);
+  --color-dark-teal-600: hsl(197 65.7% 40%);
+  --color-dark-teal-700: hsl(197.2 66% 30%);
+  --color-dark-teal-800: hsl(196.8 66.7% 20%);
+  --color-dark-teal-900: hsl(196.4 64.7% 10%);
+  --color-dark-teal-950: hsl(197.5 66.7% 7.1%);
+
+  --color-air-force-blue-50: hsl(190 23.1% 94.9%);
+  --color-air-force-blue-100: hsl(198.5 25.5% 90%);
+  --color-air-force-blue-200: hsl(195 23.5% 80%);
+  --color-air-force-blue-300: hsl(196.2 24.2% 70%);
+  --color-air-force-blue-400: hsl(196.2 23.5% 60%);
+  --color-air-force-blue-500: hsl(195.7 23.9% 50%);
+  --color-air-force-blue-600: hsl(196.3 23.5% 40%);
+  --color-air-force-blue-700: hsl(196.2 24.2% 30%);
+  --color-air-force-blue-800: hsl(195 23.5% 20%);
+  --color-air-force-blue-900: hsl(198.5 25.5% 10%);
+  --color-air-force-blue-950: hsl(195 22.2% 7.1%);
+
+  --color-ash-grey-50: hsl(135 15.4% 94.9%);
+  --color-ash-grey-100: hsl(120 13.7% 90%);
+  --color-ash-grey-200: hsl(127.5 15.7% 80%);
+  --color-ash-grey-300: hsl(125.2 15% 70%);
+  --color-ash-grey-400: hsl(126 14.7% 60%);
+  --color-ash-grey-500: hsl(126.2 15.3% 50%);
+  --color-ash-grey-600: hsl(126 14.7% 40%);
+  --color-ash-grey-700: hsl(125.2 15% 30%);
+  --color-ash-grey-800: hsl(127.5 15.7% 20%);
+  --color-ash-grey-900: hsl(120 13.7% 10%);
+  --color-ash-grey-950: hsl(130 16.7% 7.1%);
+
+  --color-beige-50: hsl(77.1 53.8% 94.9%);
+  --color-beige-100: hsl(78.6 56.9% 90%);
+  --color-beige-200: hsl(79.3 54.9% 80%);
+  --color-beige-300: hsl(79.1 55.6% 70%);
+  --color-beige-400: hsl(78.8 54.9% 60%);
+  --color-beige-500: hsl(79.1 55.3% 50%);
+  --color-beige-600: hsl(78.8 54.9% 40%);
+  --color-beige-700: hsl(79.1 55.6% 30%);
+  --color-beige-800: hsl(79.3 54.9% 20%);
+  --color-beige-900: hsl(78.6 56.9% 10%);
+  --color-beige-950: hsl(81 55.6% 7.1%);
+}
+
+/* Semantic tokens */
+:root {
+  --canvas: var(--color-dark-teal-950);
+  --canvas-lift: hsl(197 58% 13%);
+  --chrome: hsl(197 45% 9%);
+  --panel: hsl(197 38% 10.5%);
+  --panel-raised: hsl(197 30% 13.5%);
+  --well: hsl(197 48% 5.5%);
+  --line: hsl(196 60% 78% / 0.12);
+  --line-strong: hsl(196 60% 78% / 0.2);
+
+  --text: var(--color-air-force-blue-50);
+  --text-muted: var(--color-air-force-blue-300);
+  --text-faint: var(--color-air-force-blue-400);
+
+  --accent: var(--color-ink-black-400);
+  --accent-hover: var(--color-ink-black-300);
+  --accent-ink: var(--color-ink-black-950);
+  --accent-glow: hsl(196.9 94.1% 60% / 0.18);
+
+  --felt: var(--color-dark-teal-800);
+  --felt-deep: var(--color-dark-teal-950);
+  --card-face: hsl(196 26% 97%);
+  --card-ink: var(--color-ink-black-950);
+  --card-red: hsl(356 72% 46%);
+  --suit-red: hsl(356 84% 70%);
+  --danger: hsl(356 84% 74%);
+  --shadow-color: 197 70% 3%;
+
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+}
+
+:root {
+  color-scheme: dark;
   font-family: Inter, system-ui, sans-serif;
-  color: #f4f1e8;
-  background: #171815;
+  color: var(--text);
+  background: var(--canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss03';
+}
+
+@supports (font-variation-settings: normal) {
+  :root { font-family: InterVariable, system-ui, sans-serif; font-optical-sizing: auto; }
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: #171815; }
+html { min-width: 320px; background: var(--canvas); }
 body { margin: 0; min-width: 320px; min-height: 100dvh; }
 button, input { font: inherit; }
 button { color: inherit; }
-button:focus-visible, a:focus-visible { outline: 2px solid #e8b95d; outline-offset: 3px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }

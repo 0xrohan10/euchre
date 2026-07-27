@@ -1,4 +1,4 @@
-# Kitty
+# Euchs.xyz
 
 A server-authoritative, four-player Euchre game built with TanStack Start, Effect v4, Better Auth, Drizzle ORM, and PostgreSQL.
 

@@ -14,6 +14,17 @@ function CardFace({ card, playable = false, onClick }: { card: Card; playable?: 
   return onClick ? <button className={className} disabled={!playable} onClick={onClick}>{content}</button> : <div className={className}>{content}</div>
 }
 
+function Brand() {
+  return <a className="brand" href="/" aria-label="Homepage">
+    <svg className="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <rect className="brand-mark-back" x="4" y="4.5" width="11" height="15" rx="2.6" transform="rotate(-20 9.5 12)" />
+      <rect className="brand-mark-front" x="11.2" y="3.5" width="11" height="16" rx="2.8" />
+      <path className="brand-mark-pip" d="M16.7 8.7 19.5 11.5 16.7 14.3 13.9 11.5Z" />
+    </svg>
+    <span>Euchs</span>
+  </a>
+}
+
 function HiddenHand({ count }: { count: number }) {
   return <div className="hidden-hand">{Array.from({ length: count }, (_, index) => <i className="card-back" key={index} />)}</div>
 }
@@ -50,7 +61,7 @@ function AuthScreen() {
 
   return <main className="auth-shell">
     <section className="auth-card">
-      <a className="brand" href="/"><span className="brand-mark">K</span><span>Kitty</span></a>
+      <Brand />
       <div><span className="eyebrow">Private tables</span><h1>{mode === 'sign-in' ? 'Take your seat.' : 'Join the table.'}</h1><p>Server-authoritative Euchre for four players.</p></div>
       <form onSubmit={submit}>
         {mode === 'sign-up' && <label>Name<input name="name" required minLength={2} autoComplete="name" /></label>}
@@ -74,7 +85,7 @@ function Lobby({ room, onRoom, userName }: { room: RoomView | null; onRoom: (roo
     try { onRoom(await operation()) } catch { setError('Could not open that table.') } finally { setPending(false) }
   }
   return <main className="lobby-shell">
-    <header className="app-header"><a className="brand" href="/"><span className="brand-mark">K</span><span>Kitty</span></a><div className="header-actions"><span className="eyebrow">{userName}</span><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
+    <header className="app-header"><Brand /><div className="header-actions"><span className="eyebrow">{userName}</span><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
     <section className="lobby-card">
       {room ? <>
         <span className="eyebrow">Invite table</span><h1>Waiting for four</h1><button className="room-code large" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}?room=${room.code}`)}>{room.code} · Copy invite</button>
@@ -118,7 +129,7 @@ function GameTable({ room, onRoom }: { room: RoomView; onRoom: (room: RoomView) 
   const controls = isTurn && !pending && (game.phase === 'ordering' || game.phase === 'calling')
   const availableSuits = SUITS.filter((suit) => game.phase === 'calling' && suit !== game.upCard.suit && (!game.rules.requireNaturalTrump || hasNaturalTrump(game.hand, suit)))
   return <div className="game-shell">
-    <header className="app-header"><a className="brand" href="/"><span className="brand-mark">K</span><span>Kitty</span></a><div className="room-meta"><span className="eyebrow">Table</span><button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}?room=${room.code}`)}>{room.code}</button></div><div className="header-actions"><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
+    <header className="app-header"><Brand /><div className="room-meta"><span className="eyebrow">Table</span><button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}?room=${room.code}`)}>{room.code}</button></div><div className="header-actions"><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
     <div className="match-layout">
       <aside className="score-panel"><div className="score-heading"><div><span className="eyebrow">Match to 10</span><h1>Score</h1></div><span className="hand-count">Hand {game.handNumber}</span></div><div className="score-row us"><strong>Your team</strong><span className="score">{game.score[viewerTeam]}</span></div><div className="score-row"><strong>Opponents</strong><span className="score">{game.score[opponentTeam]}</span></div><div className="hand-status"><span>Tricks</span><strong>{game.tricks[viewerTeam]}–{game.tricks[opponentTeam]}</strong></div></aside>
       <main className="table-wrap"><section className="felt-table">
