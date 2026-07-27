@@ -21,6 +21,8 @@ const PLAYERS = ['You', 'Mara', 'Jonah', 'Theo']
 const SUIT_SYMBOL: Record<Suit, string> = { clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }
 
 function savedRules(): GameRules {
+  if (typeof localStorage === 'undefined') return DEFAULT_RULES
+
   try {
     const saved = localStorage.getItem('kitty-rules')
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) as Partial<GameRules> } : DEFAULT_RULES
@@ -114,7 +116,7 @@ export default function App() {
   const [goingAlone, setGoingAlone] = useState(false)
   const [copied, setCopied] = useState(false)
   const [inviteCopied, setInviteCopied] = useState(false)
-  const [muted, setMuted] = useState(() => localStorage.getItem('kitty-muted') === 'true')
+  const [muted, setMuted] = useState(() => typeof localStorage !== 'undefined' && localStorage.getItem('kitty-muted') === 'true')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const humanTurn = game.activePlayer === 0
   const showingCompletedTrick = game.phase === 'trick-complete'
