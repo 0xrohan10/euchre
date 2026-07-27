@@ -4,8 +4,8 @@ A server-authoritative, four-player Euchre game built with TanStack Start, Effec
 
 ## Local setup
 
-1. Copy `.env.example` to `.env` and set `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL`.
-2. Create the PostgreSQL database.
+1. Copy `.env.example` to `.env` and set `BETTER_AUTH_SECRET`.
+2. Start PostgreSQL with `docker compose up -d` (exposed on port `55437`).
 3. Apply migrations with `bun run db:migrate`.
 4. Start the application with `bun run dev`.
 
@@ -17,6 +17,8 @@ A server-authoritative, four-player Euchre game built with TanStack Start, Effec
 - `bun run build`: build client and server bundles
 - `bun run test`: run the Vitest suite
 - `bun run lint`: run Oxlint
+- `docker compose up -d`: start the development PostgreSQL database
+- `docker compose down`: stop the development PostgreSQL database
 - `bun run db:generate -- --name=<name>`: generate a migration from the Drizzle schema
 - `bun run db:migrate`: apply pending migrations
 

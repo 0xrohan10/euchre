@@ -6,6 +6,6 @@ export default defineConfig({
   schema: './src/db/schema/index.ts',
   out: './src/db/migrations',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/kitty',
+    url: process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:55437/kitty',
   },
 })
