@@ -42,6 +42,10 @@ export const createRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createRoom(context.session.user.id))))
 
+export const createSinglePlayerRoomFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createSinglePlayerRoom(context.session.user.id))))
+
 export const getCurrentRoomFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.currentRoom(context.session.user.id))))
@@ -50,6 +54,11 @@ export const joinRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((value: unknown) => ({ code: text(object(value).code, 'invite code').toUpperCase() }))
   .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.joinRoom(context.session.user.id, data.code))))
+
+export const leaveRoomFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator(roomIdInput)
+  .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.leaveRoom(context.session.user.id, data.roomId))))
 
 export const getRoomFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])

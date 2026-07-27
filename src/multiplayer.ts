@@ -1,10 +1,10 @@
-import type { Card, GameAction, GameRules, GameState, Player } from './game'
+import { chooseBotAction, reduceGame, type Card, type GameAction, type GameRules, type GameState, type Player } from './game'
 
 export type RoomStatus = 'lobby' | 'playing' | 'paused' | 'finished'
 
 export type SeatView = {
   seat: Player
-  userId: string
+  userId: string | null
   name: string
   controller: 'human' | 'bot'
   connected: boolean
@@ -83,6 +83,14 @@ export function canPassCalling(stickDealer: boolean, isDealer: boolean, callable
   return !stickDealer || !isDealer || callableSuitCount === 0
 }
 
-export function eligibleBotVoters<T extends { seat: number; userId: string; connected: boolean; controller: 'human' | 'bot' }>(seats: readonly T[], disconnectedSeat: number): T[] {
+export function advanceBot(game: GameState, seats: readonly { seat: number; controller: 'human' | 'bot' }[]): GameState {
+  if (game.phase === 'trick-complete') return game
+  const active = seats.find(({ seat }) => seat === game.activePlayer)
+  if (active?.controller !== 'bot') return game
+  const action = chooseBotAction(game)
+  return action ? reduceGame(game, action) : game
+}
+
+export function eligibleBotVoters<T extends { seat: number; userId: string | null; connected: boolean; controller: 'human' | 'bot' }>(seats: readonly T[], disconnectedSeat: number): T[] {
   return seats.filter((seat) => seat.seat !== disconnectedSeat && seat.connected && seat.controller === 'human')
 }

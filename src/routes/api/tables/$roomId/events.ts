@@ -60,7 +60,7 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
               close()
             }, { once: true })
             await publish()
-            if (!closed) timer = setInterval(() => void publish(), 1_000)
+            if (!closed) timer = setInterval(() => void publish(), 500)
           },
           cancel: close,
         })

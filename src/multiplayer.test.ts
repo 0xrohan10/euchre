@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { createDeck, createGame } from './game'
-import { acceptRoomUpdate, acceptsRoomAction, canPassCalling, eligibleBotVoters, playerAt, projectGame, relativePlayer, statusForGame, statusForPresence, type RoomView, type SeatView } from './multiplayer'
+import { acceptRoomUpdate, acceptsRoomAction, advanceBot, canPassCalling, eligibleBotVoters, playerAt, projectGame, relativePlayer, statusForGame, statusForPresence, type RoomView, type SeatView } from './multiplayer'
 
 it('projects only the authenticated player hand', () => {
   const game = createGame(createDeck())
@@ -58,4 +58,23 @@ it('counts only connected human voters', () => {
   ] as SeatView[]
 
   expect(eligibleBotVoters(seats, 0).map((seat) => seat.userId)).toEqual(['b'])
+})
+
+it('advances only one bot turn so each decision can be shown', () => {
+  const game = createGame(createDeck())
+  game.phase = 'playing'
+  game.activePlayer = 1
+  game.trump = 'clubs'
+  game.maker = 1
+  const seats = [
+    { seat: 0, controller: 'human' as const },
+    { seat: 1, controller: 'bot' as const },
+    { seat: 2, controller: 'bot' as const },
+    { seat: 3, controller: 'bot' as const },
+  ]
+
+  const result = advanceBot(game, seats)
+
+  expect(result.activePlayer).toBe(2)
+  expect(result.trick.map(({ player }) => player)).toEqual([1])
 })

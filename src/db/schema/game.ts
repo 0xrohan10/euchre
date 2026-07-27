@@ -20,7 +20,7 @@ export const room = pgTable('room', {
 export const roomSeat = pgTable('room_seat', {
   roomId: uuid('room_id').notNull().references(() => room.id, { onDelete: 'cascade' }),
   seat: integer('seat').notNull(),
-  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
   controller: seatController('controller').notNull().default('human'),
   connected: boolean('connected').notNull().default(false),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),

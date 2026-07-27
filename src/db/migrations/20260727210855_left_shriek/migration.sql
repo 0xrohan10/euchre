@@ -1,0 +1,1 @@
+ALTER TABLE "room_seat" ALTER COLUMN "user_id" DROP NOT NULL;

@@ -17,6 +17,7 @@
     "@tanstack/react-router": "^1.170.18",
     "@tanstack/react-start": "^1.168.32",
     "better-auth": "1.7.0-rc.2",
+    "cardsJS": "^1.1.1",
     "dotenv": "17.4.2",
     "drizzle-orm": "1.0.0-rc.4",
     "effect": "4.0.0-beta.102",

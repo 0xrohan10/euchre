@@ -2,8 +2,8 @@ import { and, desc, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, ManagedRuntime } from 'effect'
 import { db } from '../db/index.server'
 import { disconnectVote, room, roomCommand, roomSeat, user } from '../db/schema'
-import { chooseBotAction, createGame, DEFAULT_RULES, reduceGame, type GameAction, type GameState, type Player } from '../game'
-import { acceptsRoomAction, eligibleBotVoters, projectGame, statusForGame, statusForPresence, type PlayerAction, type RoomView, type SeatView } from '../multiplayer'
+import { createGame, DEFAULT_RULES, reduceGame, type GameAction, type Player } from '../game'
+import { acceptsRoomAction, advanceBot, eligibleBotVoters, projectGame, statusForGame, statusForPresence, type PlayerAction, type RoomView, type SeatView } from '../multiplayer'
 
 export class GameServiceError extends Data.TaggedError('GameServiceError')<{
   readonly code: 'not-found' | 'forbidden' | 'conflict' | 'invalid' | 'database'
@@ -19,8 +19,10 @@ type SubmitCommand = {
 
 type GameServiceShape = {
   createRoom: (userId: string) => Effect.Effect<RoomView, GameServiceError>
+  createSinglePlayerRoom: (userId: string) => Effect.Effect<RoomView, GameServiceError>
   currentRoom: (userId: string) => Effect.Effect<RoomView | null, GameServiceError>
   joinRoom: (userId: string, code: string) => Effect.Effect<RoomView, GameServiceError>
+  leaveRoom: (userId: string, roomId: string) => Effect.Effect<void, GameServiceError>
   getRoom: (userId: string, roomId: string) => Effect.Effect<RoomView, GameServiceError>
   submit: (userId: string, command: SubmitCommand) => Effect.Effect<RoomView, GameServiceError>
   voteForBot: (userId: string, roomId: string, disconnectedSeat: Player, approve: boolean) => Effect.Effect<RoomView, GameServiceError>
@@ -50,19 +52,6 @@ function randomCode(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(6)), (value) => alphabet[value % alphabet.length]).join('')
 }
 
-function automate(game: GameState, seats: readonly { seat: number; controller: 'human' | 'bot' }[]): GameState {
-  let current = game
-  for (let step = 0; step < 64; step += 1) {
-    if (current.phase === 'trick-complete') return current
-    const active = seats.find(({ seat }) => seat === current.activePlayer)
-    if (active?.controller !== 'bot') return current
-    const action = chooseBotAction(current)
-    if (!action) return current
-    current = reduceGame(current, action)
-  }
-  throw new DomainError('invalid', 'Automatic play did not settle.')
-}
-
 async function viewRoom(userId: string, roomId: string): Promise<RoomView> {
   const [record] = await db.select().from(room).where(eq(room.id, roomId)).limit(1)
   if (!record) throw new DomainError('not-found', 'Table not found.')
@@ -73,7 +62,7 @@ async function viewRoom(userId: string, roomId: string): Promise<RoomView> {
     name: user.name,
     controller: roomSeat.controller,
     connected: roomSeat.connected,
-  }).from(roomSeat).innerJoin(user, eq(roomSeat.userId, user.id)).where(eq(roomSeat.roomId, roomId)).orderBy(roomSeat.seat)
+  }).from(roomSeat).leftJoin(user, eq(roomSeat.userId, user.id)).where(eq(roomSeat.roomId, roomId)).orderBy(roomSeat.seat)
   const viewer = seatRows.find((seat) => seat.userId === userId)
   if (!viewer) throw new DomainError('forbidden', 'You are not seated at this table.')
 
@@ -94,7 +83,7 @@ async function viewRoom(userId: string, roomId: string): Promise<RoomView> {
     hostUserId: record.hostUserId,
     viewerSeat: viewer.seat as Player,
     rules: record.rules,
-    seats: seatRows as SeatView[],
+    seats: seatRows.map((seat) => ({ ...seat, name: seat.name ?? `Bot ${seat.seat}` })) as SeatView[],
     game: record.game ? projectGame(record.game, viewer.seat as Player) : null,
     disconnectVote: disconnectedSeat === undefined ? null : {
       disconnectedSeat: disconnectedSeat as Player,
@@ -137,9 +126,12 @@ const GameServiceLive = Layer.succeed(GameService, GameService.of({
           await tx.update(room).set({ status, version, updatedAt: now }).where(eq(room.id, roomId))
         }
         if (staleSeats.length > 0) return
-        if (!record.game) return
-        if (status !== 'playing' || record.game.phase !== 'trick-complete' || now.getTime() - record.updatedAt.getTime() < 1_600) return
-        const game = automate(reduceGame(record.game, { type: 'collect-trick' }), currentSeats)
+        if (!record.game || status !== 'playing') return
+        const elapsed = now.getTime() - record.updatedAt.getTime()
+        const game = record.game.phase === 'trick-complete'
+          ? elapsed >= 1_600 ? reduceGame(record.game, { type: 'collect-trick' }) : record.game
+          : elapsed >= 900 ? advanceBot(record.game, currentSeats) : record.game
+        if (game === record.game) return
         await tx.update(room).set({ game, status: statusForGame(game), version: version + 1, updatedAt: now }).where(eq(room.id, roomId))
       })
       return viewRoom(userId, roomId)
@@ -160,6 +152,29 @@ const GameServiceLive = Layer.succeed(GameService, GameService.of({
       const roomId = await db.transaction(async (tx) => {
         const [created] = await tx.insert(room).values({ code: randomCode(), hostUserId: userId, rules: DEFAULT_RULES }).returning()
         await tx.insert(roomSeat).values({ roomId: created.id, seat: 0, userId, connected: true })
+        return created.id
+      })
+      return viewRoom(userId, roomId)
+    },
+    catch: failure,
+  })),
+  createSinglePlayerRoom: Effect.fn('GameService.createSinglePlayerRoom')((userId: string) => Effect.tryPromise({
+    try: async () => {
+      const roomId = await db.transaction(async (tx) => {
+        const game = createGame(undefined, DEFAULT_RULES)
+        const [created] = await tx.insert(room).values({
+          code: randomCode(),
+          hostUserId: userId,
+          rules: DEFAULT_RULES,
+          status: 'playing',
+          game,
+        }).returning()
+        await tx.insert(roomSeat).values([
+          { roomId: created.id, seat: 0, userId, connected: true },
+          { roomId: created.id, seat: 1, controller: 'bot' },
+          { roomId: created.id, seat: 2, controller: 'bot' },
+          { roomId: created.id, seat: 3, controller: 'bot' },
+        ])
         return created.id
       })
       return viewRoom(userId, roomId)
@@ -187,6 +202,34 @@ const GameServiceLive = Layer.succeed(GameService, GameService.of({
     },
     catch: failure,
   })),
+  leaveRoom: Effect.fn('GameService.leaveRoom')((userId: string, roomId: string) => Effect.tryPromise({
+    try: async () => {
+      await db.transaction(async (tx) => {
+        const [record] = await tx.select().from(room).where(eq(room.id, roomId)).for('update').limit(1)
+        if (!record) throw new DomainError('not-found', 'Table not found.')
+        const seats = await tx.select().from(roomSeat).where(eq(roomSeat.roomId, roomId)).orderBy(roomSeat.seat)
+        if (!seats.some((seat) => seat.userId === userId)) throw new DomainError('forbidden', 'You are not seated at this table.')
+        const singlePlayer = seats.length === 4 && seats.every((seat) => seat.userId === userId || (seat.userId === null && seat.controller === 'bot'))
+        if (record.status !== 'lobby') {
+          if (!singlePlayer) throw new DomainError('conflict', 'You can only leave a multiplayer table before the match starts.')
+          await tx.delete(room).where(eq(room.id, roomId))
+          return
+        }
+        const remaining = seats.filter((seat) => seat.userId !== userId)
+        await tx.delete(roomSeat).where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.userId, userId)))
+        if (remaining.length === 0) {
+          await tx.delete(room).where(eq(room.id, roomId))
+          return
+        }
+        for (const [seat, occupant] of remaining.entries()) {
+          if (occupant.seat !== seat) await tx.update(roomSeat).set({ seat }).where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.userId, occupant.userId!)))
+        }
+        const hostUserId = record.hostUserId === userId ? remaining[0].userId! : record.hostUserId
+        await tx.update(room).set({ hostUserId, version: record.version + 1, updatedAt: new Date() }).where(eq(room.id, roomId))
+      })
+    },
+    catch: failure,
+  })),
   getRoom: Effect.fn('GameService.getRoom')((userId: string, roomId: string) => Effect.tryPromise({
     try: () => viewRoom(userId, roomId),
     catch: failure,
@@ -209,12 +252,11 @@ const GameServiceLive = Layer.succeed(GameService, GameService.of({
         if (!hostAction && record.game.activePlayer !== actor.seat) throw new DomainError('forbidden', 'It is not your turn.')
         const reduced = reduceGame(record.game, command.action as GameAction)
         if (reduced === record.game) throw new DomainError('invalid', 'That action is not legal now.')
-        const game = automate(reduced, seats)
         const hasDisconnectedHuman = seats.some((seat) => !seat.connected && seat.controller === 'human')
         const hostDisconnected = seats.some((seat) => seat.userId === record.hostUserId && !seat.connected && seat.controller === 'human')
-        const status = statusForPresence(statusForGame(game), game.phase, hasDisconnectedHuman, hostDisconnected)
+        const status = statusForPresence(statusForGame(reduced), reduced.phase, hasDisconnectedHuman, hostDisconnected)
         await tx.insert(roomCommand).values({ roomId: command.roomId, commandId: command.commandId, userId, action: command.action as GameAction })
-        await tx.update(room).set({ game, status, version: record.version + 1, updatedAt: new Date() }).where(eq(room.id, command.roomId))
+        await tx.update(room).set({ game: reduced, status, version: record.version + 1, updatedAt: new Date() }).where(eq(room.id, command.roomId))
       })
       return viewRoom(userId, command.roomId)
     },
@@ -238,10 +280,9 @@ const GameServiceLive = Layer.succeed(GameService, GameService.of({
         if (eligibleVoters.length > 0 && eligibleVoters.every((seat) => votes.some((vote) => vote.voterUserId === seat.userId && vote.approveBot))) {
           await tx.update(roomSeat).set({ controller: 'bot' }).where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.seat, disconnected.seat)))
           const controlledSeats = seats.map((seat) => seat.seat === disconnected.seat ? { ...seat, controller: 'bot' as const } : seat)
-          const game = automate(record.game, controlledSeats)
-          const status = controlledSeats.some((seat) => !seat.connected && seat.controller === 'human') ? 'paused' : statusForGame(game)
+          const status = controlledSeats.some((seat) => !seat.connected && seat.controller === 'human') ? 'paused' : statusForGame(record.game)
           const hostUserId = disconnected.userId === record.hostUserId ? eligibleVoters[0]?.userId ?? record.hostUserId : record.hostUserId
-          await tx.update(room).set({ status, hostUserId, game, version: record.version + 1, updatedAt: new Date() }).where(eq(room.id, roomId))
+          await tx.update(room).set({ status, hostUserId, version: record.version + 1, updatedAt: new Date() }).where(eq(room.id, roomId))
           await tx.delete(disconnectVote).where(eq(disconnectVote.roomId, roomId))
         } else if (!previousVote || previousVote.approveBot !== approve) {
           await tx.update(room).set({ version: record.version + 1, updatedAt: new Date() }).where(eq(room.id, roomId))
