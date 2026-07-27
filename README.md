@@ -1,32 +1,30 @@
-# React + TypeScript + Vite
+# Kitty
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A server-authoritative, four-player Euchre game built with TanStack Start, Effect v4, Better Auth, Drizzle ORM, and PostgreSQL.
 
-Currently, two official plugins are available:
+## Local setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Copy `.env.example` to `.env` and set `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL`.
+2. Create the PostgreSQL database.
+3. Apply migrations with `bun run db:migrate`.
+4. Start the application with `bun run dev`.
 
-## React Compiler
+`BETTER_AUTH_SECRET` must contain at least 32 high-entropy characters. Keep authentication and the frontend on the same origin in production.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Commands
 
-## Expanding the Oxlint configuration
+- `bun run dev`: start the development server
+- `bun run build`: build client and server bundles
+- `bun run test`: run the Vitest suite
+- `bun run lint`: run Oxlint
+- `bun run db:generate -- --name=<name>`: generate a migration from the Drizzle schema
+- `bun run db:migrate`: apply pending migrations
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Architecture
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+- Better Auth owns users, password credentials, sessions, and authentication cookies.
+- Drizzle owns the PostgreSQL schema and generated migration history.
+- Effect's `GameService` owns transactional game workflows and typed failures.
+- `game.ts` remains a deterministic, framework-independent rules engine.
+- TanStack server functions authenticate and validate commands before invoking Effect.
+- SSE streams seat-redacted room views; opponent hands and the kitty never leave the server.

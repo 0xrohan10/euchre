@@ -1,349 +1,171 @@
-import { useEffect, useReducer, useState, type CSSProperties } from 'react'
-import { Check, Copy, Settings, Users, Volume2, VolumeX, X } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { authClient } from './lib/auth-client'
+import { createRoomFn, getCurrentRoomFn, getRoomFn, joinRoomFn, submitCommandFn, voteForBotFn } from './server/game.functions'
+import { hasNaturalTrump, legalCards, sortHand, SUITS, teamOf, type Card, type GameAction, type Player, type Suit } from './game'
+import { acceptRoomUpdate, canPassCalling, playerAt, relativePlayer, type RoomView, type SeatView } from './multiplayer'
 import './App.css'
-import {
-  DEFAULT_RULES,
-  SUITS,
-  chooseBotAction,
-  createGame,
-  hasNaturalTrump,
-  legalCards,
-  reduceGame,
-  sortHand,
-  teamOf,
-  type Card as CardType,
-  type GameRules,
-  type Player,
-  type Suit,
-} from './game'
 
-const PLAYERS = ['You', 'Mara', 'Jonah', 'Theo']
 const SUIT_SYMBOL: Record<Suit, string> = { clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }
 
-function savedRules(): GameRules {
-  if (typeof localStorage === 'undefined') return DEFAULT_RULES
-
-  try {
-    const saved = localStorage.getItem('kitty-rules')
-    return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) as Partial<GameRules> } : DEFAULT_RULES
-  } catch {
-    return DEFAULT_RULES
-  }
-}
-
-function RuleToggle({ name, title, description, checked, onChange }: {
-  name: keyof GameRules
-  title: string
-  description: string
-  checked: boolean
-  onChange: (enabled: boolean) => void
-}) {
-  return (
-    <label className="rule-toggle">
-      <span><strong>{title}</strong><small>{description}</small></span>
-      <input type="checkbox" name={name} checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <i aria-hidden="true" />
-    </label>
-  )
-}
-
-function PlayingCard({ card, playable = false, invalid = false, selected = false, dealIndex, onClick }: {
-  card: CardType
-  playable?: boolean
-  invalid?: boolean
-  selected?: boolean
-  dealIndex?: number
-  onClick?: () => void
-}) {
+function CardFace({ card, playable = false, onClick }: { card: Card; playable?: boolean; onClick?: () => void }) {
   const red = card.suit === 'hearts' || card.suit === 'diamonds'
-  const className = `playing-card ${red ? 'red' : ''} ${playable ? 'playable' : ''} ${invalid ? 'invalid' : ''} ${selected ? 'selected' : ''} ${dealIndex !== undefined ? 'dealt' : ''}`
-  const style = dealIndex !== undefined ? { '--deal-index': dealIndex } as CSSProperties : undefined
-  const content = (
-    <>
-      <span className="card-corner"><strong>{card.rank}</strong><span>{SUIT_SYMBOL[card.suit]}</span></span>
-      <span className="card-suit" aria-hidden="true">{SUIT_SYMBOL[card.suit]}</span>
-    </>
-  )
-
-  if (onClick) {
-    return <button type="button" className={className} style={style} onClick={onClick} aria-label={`${card.rank} of ${card.suit}`}>{content}</button>
-  }
-  return <div className={className} style={style} aria-label={`${card.rank} of ${card.suit}`} aria-disabled={invalid || undefined}>{content}</div>
-}
-
-function PlayerBadge({ player, active, dealer, partner, tricksWon, maker = false, trump = null, compact = false }: {
-  player: Player
-  active: boolean
-  dealer: boolean
-  partner: boolean
-  tricksWon: number
-  maker?: boolean
-  trump?: Suit | null
-  compact?: boolean
-}) {
-  const redTrump = trump === 'hearts' || trump === 'diamonds'
-
-  return (
-    <div className={`player-badge ${active ? 'active' : ''} ${compact ? 'compact' : ''}`}>
-      {tricksWon > 0 ? (
-        <span className="won-tricks" aria-label={`${tricksWon} ${tricksWon === 1 ? 'trick' : 'tricks'} won`}>
-          {Array.from({ length: tricksWon }, (_, index) => <i className="won-trick-card" key={index} />)}
-        </span>
-      ) : null}
-      {maker && trump ? <span className={`maker-chip ${redTrump ? 'red' : ''}`} title={`Called ${trump}`} aria-label={`Called ${trump}`}>{SUIT_SYMBOL[trump]}</span> : null}
-      <div className={`avatar avatar-${player}`}>{PLAYERS[player][0]}</div>
-      <div className="player-copy">
-        <strong>{PLAYERS[player]}</strong>
-        <span>{partner ? 'Your partner' : player === 0 ? 'South' : ['','West','North','East'][player]}</span>
-      </div>
-      {dealer ? <span className="dealer-chip" title="Dealer" aria-label="Dealer">D</span> : null}
-      {active ? <span className="turn-dot" aria-label="Current turn" /> : null}
-    </div>
-  )
+  const className = `playing-card dealt ${red ? 'red' : ''} ${onClick ? (playable ? 'playable' : 'invalid') : ''}`
+  const content = <><span className="card-corner"><strong>{card.rank}</strong><span>{SUIT_SYMBOL[card.suit]}</span></span><span className="card-suit">{SUIT_SYMBOL[card.suit]}</span></>
+  return onClick ? <button className={className} disabled={!playable} onClick={onClick}>{content}</button> : <div className={className}>{content}</div>
 }
 
 function HiddenHand({ count }: { count: number }) {
-  return (
-    <div className="hidden-hand" aria-label={`${count} cards remaining`}>
-      {Array.from({ length: count }, (_, index) => <div className="card-back" style={{ '--deal-index': index } as CSSProperties} key={index} />)}
+  return <div className="hidden-hand">{Array.from({ length: count }, (_, index) => <i className="card-back" key={index} />)}</div>
+}
+
+function PlayerBadge({ occupant, active, dealer }: { occupant?: SeatView; active: boolean; dealer: boolean }) {
+  if (!occupant) return <div className="player-badge"><span className="avatar">?</span><span className="player-copy"><strong>Open seat</strong><span>Waiting</span></span></div>
+  return <div className={`player-badge ${active ? 'active' : ''}`}>
+    <span className={`avatar avatar-${occupant.seat}`}>{occupant.name.slice(0, 2).toUpperCase()}</span>
+    <span className="player-copy"><strong>{occupant.name}</strong><span>{occupant.controller === 'bot' ? 'Bot playing' : occupant.connected ? 'Connected' : 'Disconnected'}</span></span>
+    {dealer && <span className="dealer-chip">D</span>}
+    {active && <i className="turn-dot" />}
+  </div>
+}
+
+function AuthScreen() {
+  const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPending(true)
+    setError('')
+    const data = new FormData(event.currentTarget)
+    const email = String(data.get('email'))
+    const password = String(data.get('password'))
+    const result = mode === 'sign-up'
+      ? await authClient.signUp.email({ email, password, name: String(data.get('name')) })
+      : await authClient.signIn.email({ email, password })
+    setPending(false)
+    if (result.error) setError(result.error.message ?? 'Authentication failed.')
+    else window.location.reload()
+  }
+
+  return <main className="auth-shell">
+    <section className="auth-card">
+      <a className="brand" href="/"><span className="brand-mark">K</span><span>Kitty</span></a>
+      <div><span className="eyebrow">Private tables</span><h1>{mode === 'sign-in' ? 'Take your seat.' : 'Join the table.'}</h1><p>Server-authoritative Euchre for four players.</p></div>
+      <form onSubmit={submit}>
+        {mode === 'sign-up' && <label>Name<input name="name" required minLength={2} autoComplete="name" /></label>}
+        <label>Email<input name="email" type="email" required autoComplete="email" /></label>
+        <label>Password<input name="password" type="password" required minLength={8} autoComplete={mode === 'sign-up' ? 'new-password' : 'current-password'} /></label>
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" disabled={pending}>{pending ? 'Please wait…' : mode === 'sign-in' ? 'Sign in' : 'Create account'}</button>
+      </form>
+      <button className="quiet-button" onClick={() => setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in')}>{mode === 'sign-in' ? 'Create an account' : 'Already have an account'}</button>
+    </section>
+  </main>
+}
+
+function Lobby({ room, onRoom, userName }: { room: RoomView | null; onRoom: (room: RoomView) => void; userName: string }) {
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+  async function run(operation: () => Promise<RoomView>) {
+    setPending(true)
+    setError('')
+    try { onRoom(await operation()) } catch { setError('Could not open that table.') } finally { setPending(false) }
+  }
+  return <main className="lobby-shell">
+    <header className="app-header"><a className="brand" href="/"><span className="brand-mark">K</span><span>Kitty</span></a><div className="header-actions"><span className="eyebrow">{userName}</span><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
+    <section className="lobby-card">
+      {room ? <>
+        <span className="eyebrow">Invite table</span><h1>Waiting for four</h1><button className="room-code large" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}?room=${room.code}`)}>{room.code} · Copy invite</button>
+        <div className="lobby-seats">{[0, 1, 2, 3].map((seat) => <PlayerBadge key={seat} occupant={room.seats.find((item) => item.seat === seat)} active={false} dealer={false} />)}</div>
+        <p>The match starts automatically when the fourth player joins.</p>
+      </> : <>
+        <span className="eyebrow">Multiplayer Euchre</span><h1>Pull up a chair.</h1><p>Create a private table or enter a six-character invite code.</p>
+        <button className="primary-button" disabled={pending} onClick={() => void run(() => createRoomFn())}>Create a table</button>
+        <form className="join-form" onSubmit={(event) => { event.preventDefault(); void run(() => joinRoomFn({ data: { code } })) }}><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="INVITE" maxLength={6} required /><button className="quiet-button" disabled={pending}>Join</button></form>
+      </>}
+      {error && <p className="form-error">{error}</p>}
+    </section>
+  </main>
+}
+
+function GameTable({ room, onRoom }: { room: RoomView; onRoom: (room: RoomView) => void }) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+  const [alone, setAlone] = useState(false)
+  const game = room.game!
+  const viewer = room.viewerSeat
+  const viewerTeam = teamOf(viewer)
+  const opponentTeam = (1 - viewerTeam) as 0 | 1
+  const isTurn = room.status === 'playing' && game.activePlayer === viewer
+  const hand = sortHand(game.hand, game.trump)
+  const legal = game.phase === 'playing' && game.trump ? new Set(legalCards(game.hand, game.trick, game.trump).map((card) => card.id)) : new Set<string>()
+
+  async function act(action: GameAction) {
+    setPending(true)
+    setError('')
+    try {
+      const next = await submitCommandFn({ data: { roomId: room.id, commandId: crypto.randomUUID(), expectedVersion: room.version, action } })
+      onRoom(next)
+      setAlone(false)
+    } catch {
+      setError('The table changed before that action. Your view was refreshed.')
+      try { onRoom(await getRoomFn({ data: { roomId: room.id } })) } catch { /* The SSE connection remains the fallback. */ }
+    } finally { setPending(false) }
+  }
+
+  const controls = isTurn && !pending && (game.phase === 'ordering' || game.phase === 'calling')
+  const availableSuits = SUITS.filter((suit) => game.phase === 'calling' && suit !== game.upCard.suit && (!game.rules.requireNaturalTrump || hasNaturalTrump(game.hand, suit)))
+  return <div className="game-shell">
+    <header className="app-header"><a className="brand" href="/"><span className="brand-mark">K</span><span>Kitty</span></a><div className="room-meta"><span className="eyebrow">Table</span><button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}?room=${room.code}`)}>{room.code}</button></div><div className="header-actions"><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
+    <div className="match-layout">
+      <aside className="score-panel"><div className="score-heading"><div><span className="eyebrow">Match to 10</span><h1>Score</h1></div><span className="hand-count">Hand {game.handNumber}</span></div><div className="score-row us"><strong>Your team</strong><span className="score">{game.score[viewerTeam]}</span></div><div className="score-row"><strong>Opponents</strong><span className="score">{game.score[opponentTeam]}</span></div><div className="hand-status"><span>Tricks</span><strong>{game.tricks[viewerTeam]}–{game.tricks[opponentTeam]}</strong></div></aside>
+      <main className="table-wrap"><section className="felt-table">
+        {([0, 1, 2, 3] as Player[]).map((relative) => {
+          const player = playerAt(viewer, relative)
+          const occupant = room.seats.find((seat) => seat.seat === player)
+          const position = ['south', 'west', 'north', 'east'][relative]
+          return <div className={`seat seat-${position}`} key={player}><PlayerBadge occupant={occupant} active={game.activePlayer === player} dealer={game.dealer === player} />{relative === 0 ? <div className="human-hand">{hand.map((card) => <CardFace key={card.id} card={card} playable={isTurn && (game.phase === 'discarding' || legal.has(card.id))} onClick={() => void act({ type: game.phase === 'discarding' ? 'discard' : 'play', cardId: card.id })} />)}</div> : <HiddenHand count={game.handCounts[player]} />}</div>
+        })}
+        <div className="table-center">{game.trump && <div className={`trump-chip ${game.trump === 'hearts' || game.trump === 'diamonds' ? 'red' : ''}`}><span>{SUIT_SYMBOL[game.trump]}</span> trump</div>}<div className="trick-area">{game.trick.map((played) => <div key={played.card.id} className={`trick-card trick-player-${relativePlayer(played.player, viewer)}`}><CardFace card={played.card} /></div>)}{game.trick.length === 0 && game.phase === 'ordering' && <div className="up-card"><CardFace card={game.upCard} /></div>}</div></div>
+      </section>
+      <section className={`action-bar ${controls ? 'has-controls' : ''}`}><div className="turn-copy"><i className={`status-light ${isTurn ? 'your-turn' : ''}`} /><div><span className="eyebrow">{room.status === 'paused' ? 'Game paused' : isTurn ? 'Your turn' : 'At the table'}</span><strong>{error || game.notice}</strong></div></div>{controls && <div className="bid-controls">{game.phase === 'ordering' ? <><button className="primary-button" disabled={game.rules.requireNaturalTrump && !hasNaturalTrump(game.hand, game.upCard.suit)} onClick={() => void act({ type: 'order-up', alone })}>Order up</button><button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button></> : <><div className="suit-buttons">{availableSuits.map((suit) => <button className={suit === 'hearts' || suit === 'diamonds' ? 'red' : ''} key={suit} onClick={() => void act({ type: 'call-trump', suit, alone })}>{SUIT_SYMBOL[suit]}</button>)}</div>{canPassCalling(game.rules.stickDealer, game.activePlayer === game.dealer, availableSuits.length) && <button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button>}</>}<label className="alone-toggle"><input type="checkbox" checked={alone} onChange={(event) => setAlone(event.target.checked)} />Go alone</label></div>}
+      </section>
+      </main>
     </div>
-  )
+    {!room.disconnectVote && (game.phase === 'hand-over' || game.phase === 'match-over') && <div className="settings-scrim"><section className="settings-panel"><div className="settings-header"><div><span className="eyebrow">{game.phase === 'match-over' ? 'Match complete' : 'Hand complete'}</span><h2>{game.notice}</h2></div></div><div className="settings-section">{room.hostUserId === room.seats.find((seat) => seat.seat === viewer)?.userId ? <button className="primary-button" onClick={() => void act({ type: game.phase === 'hand-over' ? 'next-hand' : 'new-match' })}>{game.phase === 'hand-over' ? 'Next hand' : 'Play again'}</button> : <p>Waiting for the host to continue.</p>}</div></section></div>}
+    {room.disconnectVote && <div className="settings-scrim"><section className="settings-panel"><div className="settings-header"><div><span className="eyebrow">Unanimous decision</span><h2>{room.seats.find((seat) => seat.seat === room.disconnectVote?.disconnectedSeat)?.name} disconnected</h2></div></div><div className="settings-section"><p>Every connected human player must approve bot takeover. The player can reclaim their seat whenever they return.</p><button className="primary-button" onClick={() => void voteForBotFn({ data: { roomId: room.id, disconnectedSeat: room.disconnectVote!.disconnectedSeat, approve: true } }).then(onRoom)}>Approve bot takeover</button><button className="quiet-button" onClick={() => void voteForBotFn({ data: { roomId: room.id, disconnectedSeat: room.disconnectVote!.disconnectedSeat, approve: false } }).then(onRoom)}>Keep waiting</button><p>{room.disconnectVote.approvals.length} of {room.disconnectVote.requiredApprovals} approvals</p></div></section></div>}
+  </div>
 }
 
 export default function App() {
-  const [game, dispatch] = useReducer(reduceGame, undefined, () => createGame(undefined, savedRules()))
-  const [dealingHand, setDealingHand] = useState<number | null>(game.handNumber)
-  const [goingAlone, setGoingAlone] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [inviteCopied, setInviteCopied] = useState(false)
-  const [muted, setMuted] = useState(() => typeof localStorage !== 'undefined' && localStorage.getItem('kitty-muted') === 'true')
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const humanTurn = game.activePlayer === 0
-  const showingCompletedTrick = game.phase === 'trick-complete'
-  const choosingTrump = humanTurn && (game.phase === 'ordering' || game.phase === 'calling')
-  const humanCards = sortHand(game.hands[0], game.trump)
-  const canOrderUp = !game.rules.requireNaturalTrump || hasNaturalTrump(game.hands[0], game.upCard.suit)
-  const callableSuits = SUITS.filter((suit) => suit !== game.upCard.suit && (!game.rules.requireNaturalTrump || hasNaturalTrump(game.hands[0], suit)))
-  const orderingPartner = game.phase === 'ordering' && game.activePlayer !== game.dealer && teamOf(game.activePlayer) === teamOf(game.dealer)
-  const partnerLonerBlocked = orderingPartner && !game.rules.allowAloneWhenOrderingPartner
-  const legal = game.phase === 'playing' && humanTurn && game.trump
-    ? new Set(legalCards(game.hands[0], game.trick, game.trump).map((card) => card.id))
-    : new Set<string>()
+  const { data: session, isPending } = authClient.useSession()
+  const [room, setRoom] = useState<RoomView | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const roomId = room?.id
+  const updateRoom = (next: RoomView) => setRoom((current) => acceptRoomUpdate(current, next))
 
   useEffect(() => {
-    if (game.phase === 'trick-complete') {
-      const timer = window.setTimeout(() => dispatch({ type: 'collect-trick' }), 1600)
-      return () => window.clearTimeout(timer)
-    }
-    if (humanTurn || game.phase === 'hand-over' || game.phase === 'match-over' || game.phase === 'discarding') return
-    const action = chooseBotAction(game)
-    if (!action) return
-    const timer = window.setTimeout(() => dispatch(action), game.phase === 'playing' ? 650 : 900)
-    return () => window.clearTimeout(timer)
-  }, [game, humanTurn])
+    if (!session || loaded) return
+    const invite = new URLSearchParams(window.location.search).get('room')
+    const load = invite ? joinRoomFn({ data: { code: invite } }) : getCurrentRoomFn()
+    void load.then((next) => next && setRoom((current) => acceptRoomUpdate(current, next))).finally(() => setLoaded(true))
+  }, [loaded, session])
 
   useEffect(() => {
-    setDealingHand(game.handNumber)
-    const timer = window.setTimeout(() => setDealingHand(null), 520)
-    return () => window.clearTimeout(timer)
-  }, [game.handNumber])
-
-  useEffect(() => {
-    localStorage.setItem('kitty-rules', JSON.stringify(game.rules))
-  }, [game.rules])
-
-  useEffect(() => {
-    if (!settingsOpen) return
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSettingsOpen(false)
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [settingsOpen])
-
-  const copyRoomCode = async () => {
-    await navigator.clipboard?.writeText('W6K9')
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
-  }
-
-  const toggleSound = () => {
-    setMuted((current) => {
-      localStorage.setItem('kitty-muted', String(!current))
-      return !current
+    if (!roomId) return
+    const events = new EventSource(`/api/tables/${roomId}/events`)
+    events.addEventListener('room', (event) => {
+      const next = JSON.parse((event as MessageEvent<string>).data) as RoomView
+      setRoom((current) => acceptRoomUpdate(current, next))
     })
-  }
+    return () => events.close()
+  }, [roomId])
 
-  const inviteToTable = async () => {
-    const inviteUrl = new URL(window.location.href)
-    inviteUrl.searchParams.set('room', 'W6K9')
-    await navigator.clipboard?.writeText(inviteUrl.toString())
-    setInviteCopied(true)
-    window.setTimeout(() => setInviteCopied(false), 1600)
-  }
-
-  const act = (action: Parameters<typeof dispatch>[0]) => {
-    dispatch(action)
-    setGoingAlone(false)
-  }
-
-  const turnLabel = game.phase === 'hand-over' || game.phase === 'match-over'
-    ? game.notice
-    : humanTurn ? game.notice : `${PLAYERS[game.activePlayer]} is thinking…`
-
-  return (
-    <main className="game-shell">
-      <header className="app-header">
-        <a className="brand" href="/" aria-label="Kitty home">
-          <span className="brand-mark">K</span>
-          <span>Kitty</span>
-        </a>
-        <div className="room-meta">
-          <span className="eyebrow">Private table</span>
-          <button type="button" className="room-code" onClick={copyRoomCode} aria-label="Copy room code W6K9">
-            W6K9 {copied ? <Check size={14} /> : <Copy size={14} />}
-          </button>
-        </div>
-        <div className="header-actions">
-          <button type="button" className={`icon-button ${muted ? 'active' : ''}`} onClick={toggleSound} aria-label={muted ? 'Unmute sound' : 'Mute sound'} aria-pressed={muted}>{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button type="button" className={`icon-button ${settingsOpen ? 'active' : ''}`} onClick={() => setSettingsOpen(true)} aria-label="Table settings" aria-expanded={settingsOpen}><Settings size={18} /></button>
-          <button type="button" className="invite-button" onClick={inviteToTable}>{inviteCopied ? <Check size={16} /> : <Users size={16} />} {inviteCopied ? 'Copied' : 'Invite'}</button>
-        </div>
-      </header>
-
-      <section className="match-layout">
-        <aside className="score-panel" aria-label="Match score">
-          <div className="score-heading">
-            <div><span className="eyebrow">First to 10</span><h1>Friendly match</h1></div>
-            <span className="hand-count">Hand {game.handNumber}</span>
-          </div>
-          <div className="score-row us">
-            <div><span className="team-pips"><i /><i /></span><strong>You & Jonah</strong></div>
-            <span className="score">{game.score[0]}</span>
-          </div>
-          <div className="score-row">
-            <div><span className="team-pips opponents"><i /><i /></span><strong>Mara & Theo</strong></div>
-            <span className="score">{game.score[1]}</span>
-          </div>
-          <div className="hand-status">
-            <span>Tricks</span>
-            <strong>{game.tricks[0]}–{game.tricks[1]}</strong>
-          </div>
-          <p className="rules-note">{[
-            game.rules.stickDealer ? 'Stick the dealer' : 'Dealer may pass',
-            game.rules.requireNaturalTrump ? 'Natural trump required' : null,
-            game.rules.allowAloneWhenOrderingPartner ? 'Partner-order loners' : null,
-          ].filter(Boolean).join(' · ')}</p>
-        </aside>
-
-        <section className="table-wrap" aria-label="Euchre table">
-          <div className="felt-table">
-            <div className="seat seat-north">
-              <PlayerBadge player={2} active={game.activePlayer === 2} dealer={game.dealer === 2} partner tricksWon={game.playerTricks[2]} maker={game.maker === 2} trump={game.trump} />
-              {game.lonePlayer !== 0 ? <HiddenHand count={game.hands[2].length} /> : <span className="sitting-out">Sitting out</span>}
-            </div>
-            <div className="seat seat-west">
-              <PlayerBadge compact player={1} active={game.activePlayer === 1} dealer={game.dealer === 1} partner={false} tricksWon={game.playerTricks[1]} maker={game.maker === 1} trump={game.trump} />
-              {game.lonePlayer !== 3 ? <HiddenHand count={game.hands[1].length} /> : <span className="sitting-out">Sitting out</span>}
-            </div>
-            <div className="seat seat-east">
-              <PlayerBadge compact player={3} active={game.activePlayer === 3} dealer={game.dealer === 3} partner={false} tricksWon={game.playerTricks[3]} maker={game.maker === 3} trump={game.trump} />
-              {game.lonePlayer !== 1 ? <HiddenHand count={game.hands[3].length} /> : <span className="sitting-out">Sitting out</span>}
-            </div>
-
-            <div className="table-center">
-              {game.trump ? <div className={`trump-chip ${game.trump === 'hearts' || game.trump === 'diamonds' ? 'red' : ''}`}><span>{SUIT_SYMBOL[game.trump]}</span> Trump</div> : null}
-              <div className={`trick-area ${showingCompletedTrick ? 'complete' : ''}`}>
-                {game.trick.map((played) => (
-                  <div className={`trick-card trick-player-${played.player} ${showingCompletedTrick && played.player === game.lastTrickWinner ? 'winner' : ''}`} key={played.card.id}>
-                    <PlayingCard card={played.card} />
-                  </div>
-                ))}
-                {showingCompletedTrick && game.lastTrickWinner !== null ? (
-                  <div className="trick-result" role="status">
-                    <span className="trick-result-check">✓</span>
-                    <strong>{game.lastTrickWinner === 0 ? 'You take the trick' : `${PLAYERS[game.lastTrickWinner]} takes the trick`}</strong>
-                  </div>
-                ) : null}
-                {game.phase === 'hand-over' ? (
-                  <div className="hand-result" role="status">
-                    <span className="eyebrow">Hand complete</span>
-                    <strong>{game.notice}</strong>
-                    <button type="button" onClick={() => act({ type: 'next-hand' })}>Start next hand</button>
-                  </div>
-                ) : null}
-                {game.trick.length === 0 && game.phase === 'playing'
-                  ? <span className="lead-hint">{game.activePlayer === 0 ? 'Lead a card' : 'Waiting for lead'}</span>
-                  : null}
-              </div>
-              {(game.phase === 'ordering' || game.phase === 'calling') ? (
-                <div className="up-card">
-                  <PlayingCard key={game.upCard.id} card={game.upCard} dealIndex={dealingHand === game.handNumber ? 0 : undefined} />
-                  <span>{game.phase === 'ordering' ? 'Turned up' : 'Turned down'}</span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="seat seat-south">
-              <PlayerBadge player={0} active={humanTurn} dealer={game.dealer === 0} partner={false} tricksWon={game.playerTricks[0]} maker={game.maker === 0} trump={game.trump} />
-              {game.lonePlayer !== 2 ? (
-                <div className="human-hand">
-                  {humanCards.map((card, index) => {
-                    const playable = game.phase === 'discarding' || legal.has(card.id)
-                    const invalid = game.phase === 'playing' && humanTurn && !legal.has(card.id)
-                    return <PlayingCard key={card.id} card={card} playable={playable} invalid={invalid} dealIndex={dealingHand === game.handNumber ? index : undefined} onClick={playable ? () => act(game.phase === 'discarding' ? { type: 'discard', cardId: card.id } : { type: 'play', cardId: card.id }) : undefined} />
-                  })}
-                </div>
-              ) : <span className="sitting-out">Your partner is going alone</span>}
-            </div>
-          </div>
-
-          <div className={`action-bar ${choosingTrump ? 'has-controls' : ''}`} aria-live="polite">
-            <div className="turn-copy">
-              <span className={`status-light ${humanTurn && !showingCompletedTrick ? 'your-turn' : ''}`} />
-              <div><span className="eyebrow">{showingCompletedTrick ? 'Trick complete' : humanTurn ? 'Your turn' : 'At the table'}</span><strong>{turnLabel}</strong></div>
-            </div>
-            {choosingTrump ? (
-              <div className="bid-controls">
-                {!(game.phase === 'calling' && game.activePlayer === game.dealer && callableSuits.length > 0) ? <button type="button" className="quiet-button" onClick={() => act({ type: 'pass' })}>{game.phase === 'calling' && game.activePlayer === game.dealer ? 'Redeal' : 'Pass'}</button> : null}
-                {game.phase === 'ordering' ? (
-                  <button type="button" className="primary-button" disabled={!canOrderUp} title={!canOrderUp ? `A natural ${game.upCard.suit} is required` : undefined} onClick={() => act({ type: 'order-up', alone: goingAlone })}>Order up {SUIT_SYMBOL[game.upCard.suit]}</button>
-                ) : (
-                  <div className="suit-buttons">
-                    {callableSuits.map((suit) => <button type="button" key={suit} className={suit === 'hearts' || suit === 'diamonds' ? 'red' : ''} onClick={() => act({ type: 'call-trump', suit, alone: goingAlone })} aria-label={`Call ${suit}`}>{SUIT_SYMBOL[suit]}</button>)}
-                  </div>
-                )}
-                <label className="alone-toggle" title={partnerLonerBlocked ? 'Enable partner-order loners in table settings' : undefined}><input type="checkbox" name="going-alone" checked={goingAlone} disabled={game.phase === 'ordering' ? !canOrderUp || partnerLonerBlocked : callableSuits.length === 0} onChange={(event) => setGoingAlone(event.target.checked)} /> Go alone</label>
-              </div>
-            ) : null}
-            {game.phase === 'match-over' ? <button type="button" className="primary-button" onClick={() => act({ type: 'new-match' })}>Play again</button> : null}
-          </div>
-        </section>
-      </section>
-      {settingsOpen ? (
-        <div className="settings-scrim" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setSettingsOpen(false)
-        }}>
-          <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-            <header className="settings-header">
-              <div><span className="eyebrow">Private table</span><h2 id="settings-title">Table settings</h2></div>
-              <button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close settings" autoFocus><X size={18} /></button>
-            </header>
-            <div className="settings-section">
-              <span className="settings-label">House rules</span>
-              <RuleToggle name="stickDealer" title="Stick the dealer" description="The dealer must choose trump in the second round." checked={game.rules.stickDealer} onChange={(enabled) => dispatch({ type: 'set-rule', rule: 'stickDealer', enabled })} />
-              <RuleToggle name="requireNaturalTrump" title="Require natural trump" description="A caller must hold the printed suit. The left bower does not count." checked={game.rules.requireNaturalTrump} onChange={(enabled) => dispatch({ type: 'set-rule', rule: 'requireNaturalTrump', enabled })} />
-              <RuleToggle name="allowAloneWhenOrderingPartner" title="Partner-order loners" description="Allow a player to go alone when ordering up their dealer-partner." checked={game.rules.allowAloneWhenOrderingPartner} onChange={(enabled) => dispatch({ type: 'set-rule', rule: 'allowAloneWhenOrderingPartner', enabled })} />
-            </div>
-            <p className="settings-note">Changes apply immediately and are saved for future matches.</p>
-          </section>
-        </div>
-      ) : null}
-    </main>
-  )
+  if (isPending) return <main className="auth-shell"><span className="eyebrow">Loading table…</span></main>
+  if (!session) return <AuthScreen />
+  if (!loaded) return <main className="auth-shell"><span className="eyebrow">Finding your seat…</span></main>
+  if (!room || room.status === 'lobby' || !room.game) return <Lobby room={room} onRoom={updateRoom} userName={session.user.name} />
+  return <GameTable room={room} onRoom={updateRoom} />
 }

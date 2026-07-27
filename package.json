@@ -6,14 +6,21 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "lint": "oxlint",
     "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.0-rc.2",
     "@tanstack/react-router": "^1.170.18",
     "@tanstack/react-start": "^1.168.32",
-    "lucide-react": "^1.27.0",
+    "better-auth": "1.7.0-rc.2",
+    "dotenv": "17.4.2",
+    "drizzle-orm": "1.0.0-rc.4",
+    "effect": "4.0.0-beta.102",
+    "pg": "8.22.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -22,6 +29,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "drizzle-kit": "1.0.0-rc.4",
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",

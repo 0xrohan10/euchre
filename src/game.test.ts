@@ -88,6 +88,33 @@ describe('Euchre rules', () => {
     expect(reduceGame(game, { type: 'order-up', alone: true }).lonePlayer).toBeNull()
   })
 
+  it('lets a human dealer at any seat choose their discard', () => {
+    const game = createGame(createDeck())
+    game.dealer = 1
+    game.activePlayer = 2
+    game.upCard = card('9', 'hearts')
+    game.hands[2] = [card('A', 'hearts'), card('K', 'hearts'), card('Q', 'hearts'), card('9', 'clubs'), card('10', 'clubs')]
+
+    const ordered = reduceGame(game, { type: 'order-up' })
+
+    expect(ordered.phase).toBe('discarding')
+    expect(ordered.activePlayer).toBe(1)
+    expect(ordered.hands[1]).toHaveLength(6)
+  })
+
+  it('chooses a discard for a bot dealer at any seat', () => {
+    const game = createGame(createDeck())
+    game.dealer = 1
+    game.activePlayer = 2
+    game.upCard = card('9', 'hearts')
+    game.hands[2] = [card('A', 'hearts'), card('K', 'hearts'), card('Q', 'hearts'), card('9', 'clubs'), card('10', 'clubs')]
+    const ordered = reduceGame(game, { type: 'order-up' })
+    const action = chooseBotAction(ordered)
+
+    expect(action?.type).toBe('discard')
+    expect(reduceGame(ordered, action!).hands[1]).toHaveLength(5)
+  })
+
   it('can go alone when ordering up its partner when enabled', () => {
     let game = createGame(createDeck())
     game.activePlayer = 1

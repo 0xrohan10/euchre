@@ -148,10 +148,6 @@ export function createGame(deck?: Card[], rules: GameRules = DEFAULT_RULES): Gam
   return deal(3, [0, 0], 1, rules, deck)
 }
 
-function lowestDiscard(hand: readonly Card[], trump: Suit): Card {
-  return [...hand].sort((a, b) => strength(a, effectiveSuit(a, trump), trump) - strength(b, effectiveSuit(b, trump), trump))[0]
-}
-
 function beginPlay(state: GameState, notice?: string): GameState {
   return {
     ...state,
@@ -207,13 +203,7 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
     const hands: GameState['hands'] = state.hands.map((hand) => [...hand]) as GameState['hands']
     hands[state.dealer].push(state.upCard)
     const ordered = { ...state, hands, trump, maker: state.activePlayer, lonePlayer }
-    if (state.dealer === 0) return { ...ordered, phase: 'discarding', activePlayer: 0, notice: 'Choose one card to discard.' }
-    const discard = lowestDiscard(hands[state.dealer], trump)
-    hands[state.dealer] = hands[state.dealer].filter((card) => card.id !== discard.id)
-    const notice = state.activePlayer === state.dealer
-      ? `Player ${state.dealer + 1} picks up ${state.upCard.rank} of ${trump}.`
-      : `Player ${state.activePlayer + 1} orders the dealer up.`
-    return beginPlay(ordered, notice)
+    return { ...ordered, phase: 'discarding', activePlayer: state.dealer, notice: 'Dealer must discard.' }
   }
 
   if (action.type === 'call-trump' && state.phase === 'calling' && action.suit !== state.upCard.suit && (!state.rules.requireNaturalTrump || hasNaturalTrump(state.hands[state.activePlayer], action.suit))) {
@@ -321,6 +311,9 @@ function chooseCard(state: GameState): Card {
 }
 
 export function chooseBotAction(state: GameState): GameAction | null {
+  if (state.phase === 'discarding' && state.trump !== null) {
+    return { type: 'discard', cardId: weakest(state.hands[state.dealer], state.trump).id }
+  }
   if (state.phase === 'ordering') {
     if (state.rules.requireNaturalTrump && !hasNaturalTrump(state.hands[state.activePlayer], state.upCard.suit)) return { type: 'pass' }
     const hand = state.activePlayer === state.dealer
