@@ -35,6 +35,8 @@ export type RoomView = {
 }
 
 export type PlayerAction = Extract<GameAction,
+  | { type: 'exchange-kitty' }
+  | { type: 'decline-exchange' }
   | { type: 'pass' }
   | { type: 'order-up' }
   | { type: 'call-trump' }
@@ -83,7 +85,7 @@ export function optimisticRoomAction(room: RoomView, action: GameAction): RoomVi
   const game = room.game
   if (!game) return room
 
-  if (action.type === 'next-hand' || action.type === 'new-match' || action.type === 'collect-trick' || action.type === 'set-rule') {
+  if (action.type === 'exchange-kitty' || action.type === 'decline-exchange' || action.type === 'next-hand' || action.type === 'new-match' || action.type === 'collect-trick' || action.type === 'set-rule') {
     return { ...room, game: { ...game, notice: 'Updating table...' } }
   }
 

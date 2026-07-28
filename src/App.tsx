@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { authClient } from './lib/auth-client'
 import { cardBackImage, cardImage, scoreFiveImages } from './card-assets'
 import { createRoomFn, createSinglePlayerRoomFn, getCurrentRoomFn, getRoomFn, joinRoomFn, leaveRoomFn, submitCommandFn, voteForBotFn } from './server/game.functions'
-import { hasNaturalTrump, legalCards, sortHand, SUITS, teamOf, type Card, type GameAction, type Player, type Suit } from './game'
+import { DEFAULT_RULES, hasNaturalTrump, legalCards, sortHand, SUITS, teamOf, type Card, type GameAction, type GameRules, type Player, type Suit } from './game'
 import { acceptRoomUpdate, canPassCalling, optimisticRoomAction, playerAt, relativePlayer, type RoomView, type SeatView } from './multiplayer'
 import './App.css'
 
 const SUIT_SYMBOL: Record<Suit, string> = { clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }
 
-function CardFace({ card, playable = false, dimmed = false, onClick }: { card: Card; playable?: boolean; dimmed?: boolean; onClick?: () => void }) {
-  const className = `playing-card dealt ${playable ? 'playable' : dimmed ? 'invalid' : ''}`
+function CardFace({ card, playable = false, dimmed = false, motionClass = '', onClick }: { card: Card; playable?: boolean; dimmed?: boolean; motionClass?: string; onClick?: () => void }) {
+  const className = `playing-card dealt ${playable ? 'playable' : dimmed ? 'invalid' : ''} ${motionClass}`
   const content = <img className="card-art" src={cardImage(card)} alt={`${card.rank} of ${card.suit}`} />
   return onClick ? <button className={className} disabled={!playable} onClick={onClick}>{content}</button> : <div className={className}>{content}</div>
 }
@@ -65,6 +65,17 @@ function HowToPlay({ label = 'Rules' }: { label?: string }) {
 
 function HiddenHand({ count }: { count: number }) {
   return <div className="hidden-hand" aria-label={`${count} hidden cards`}>{Array.from({ length: count }, (_, index) => <img className="card-back" src={cardBackImage} alt="" key={index} />)}</div>
+}
+
+function FarmerExchange({ cards, player }: { cards: Card[]; player: Player }) {
+  return <div className={`farmer-exchange exchange-player-${player}`} aria-hidden="true">
+    {([0, 1, 2] as const).map((index) => <div className="exchange-card exchange-card-out" key={`out-${index}`} style={{ '--exchange-delay': `${index * 32}ms`, '--exchange-fan': `${(index - 1) * 28}px`, '--exchange-rotation': `${(index - 1) * 5}deg`, '--exchange-stack': `${(index - 1) * 4}px`, '--exchange-stack-rotation': `${index - 1}deg` } as CSSProperties}>
+      <img src={cards[index] ? cardImage(cards[index]) : cardBackImage} alt="" />
+    </div>)}
+    {([0, 1, 2] as const).map((index) => <div className="exchange-card exchange-card-in" key={`in-${index}`} style={{ '--exchange-delay': `${32 + index * 32}ms`, '--exchange-fan': `${(index - 1) * 28}px`, '--exchange-rotation': `${(index - 1) * 5}deg`, '--exchange-stack': `${(index - 1) * 4}px`, '--exchange-stack-rotation': `${index - 1}deg` } as CSSProperties}>
+      <img src={cardBackImage} alt="" />
+    </div>)}
+  </div>
 }
 
 function FiveScore({ score, team, isViewer }: { score: number; team: 0 | 1; isViewer: boolean }) {
@@ -126,11 +137,33 @@ function AuthScreen() {
   </main>
 }
 
+function RuleToggle({ checked, description, disabled, onChange, title }: { checked: boolean; description: string; disabled: boolean; onChange: (checked: boolean) => void; title: string }) {
+  return <label className="rule-toggle">
+    <span><strong>{title}</strong><small>{description}</small></span>
+    <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+    <i aria-hidden="true" />
+  </label>
+}
+
 function Lobby({ room, onRoom, onLeave, userName }: { room: RoomView | null; onRoom: (room: RoomView) => void; onLeave: () => void; userName: string }) {
   const [mode, setMode] = useState<'multiplayer' | null>(null)
+  const [setupMode, setSetupMode] = useState<'single-player' | 'multiplayer' | null>(null)
+  const [rules, setRules] = useState<GameRules>({ ...DEFAULT_RULES })
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('kitty-rules') ?? 'null') as Partial<GameRules> | null
+      if (saved && typeof saved.stickDealer === 'boolean' && typeof saved.requireNaturalTrump === 'boolean' && typeof saved.allowAloneWhenOrderingPartner === 'boolean') setRules({ ...DEFAULT_RULES, ...saved })
+    } catch { /* Keep the standard rules when saved preferences are unreadable. */ }
+  }, [])
+
+  function setRule(rule: keyof GameRules, enabled: boolean) {
+    const next = { ...rules, [rule]: enabled }
+    setRules(next)
+    localStorage.setItem('kitty-rules', JSON.stringify(next))
+  }
   async function run(operation: () => Promise<RoomView>) {
     setPending(true)
     setError('')
@@ -157,15 +190,25 @@ function Lobby({ room, onRoom, onLeave, userName }: { room: RoomView | null; onR
         <div className="lobby-seats">{[0, 1, 2, 3].map((seat) => <PlayerBadge key={seat} occupant={room.seats.find((item) => item.seat === seat)} active={false} dealer={false} />)}</div>
         <p>The match starts automatically when the fourth player joins.</p>
         <button className="quiet-button" disabled={pending} onClick={() => void leave()}>{pending ? 'Leaving…' : 'Leave table'}</button>
+      </> : setupMode ? <>
+        <span className="eyebrow">House rules</span><h1>Set the table.</h1><p>Choose the rules for this match. We’ll remember them for your next game.</p>
+        <div className="rule-options">
+          <RuleToggle title="Stick the dealer" description="The dealer must choose trump in the second round." checked={rules.stickDealer} disabled={pending} onChange={(enabled) => setRule('stickDealer', enabled)} />
+          <RuleToggle title="Require natural trump" description="A caller must hold a card printed in that suit. The left bower does not count." checked={rules.requireNaturalTrump} disabled={pending} onChange={(enabled) => setRule('requireNaturalTrump', enabled)} />
+          <RuleToggle title="Partner-order loners" description="Allow going alone when ordering up your partner as dealer." checked={rules.allowAloneWhenOrderingPartner} disabled={pending} onChange={(enabled) => setRule('allowAloneWhenOrderingPartner', enabled)} />
+          <RuleToggle title="Farmer's hand" description="Swap three 9s or three 10s for the face-down kitty, then pass unless stuck as dealer." checked={rules.allowFarmersHand} disabled={pending} onChange={(enabled) => setRule('allowFarmersHand', enabled)} />
+        </div>
+        <button className="primary-button" disabled={pending} onClick={() => void run(() => setupMode === 'single-player' ? createSinglePlayerRoomFn({ data: { rules } }) : createRoomFn({ data: { rules } }))}>{pending ? 'Starting…' : setupMode === 'single-player' ? 'Start game' : 'Create table'}</button>
+        <button className="quiet-button" disabled={pending} onClick={() => setSetupMode(null)}>Back</button>
       </> : mode === null ? <>
         <span className="eyebrow">Choose a mode</span><h1>How do you want to play?</h1><p>Play a full match against three bots, or invite other players to your table.</p>
         <div className="mode-options">
-          <button className="mode-option" disabled={pending} onClick={() => void run(() => createSinglePlayerRoomFn())}><strong>Single player</strong><span>You and three bots</span></button>
+          <button className="mode-option" disabled={pending} onClick={() => setSetupMode('single-player')}><strong>Single player</strong><span>You and three bots</span></button>
           <button className="mode-option" onClick={() => setMode('multiplayer')}><strong>Multiplayer</strong><span>Four online players</span></button>
         </div>
       </> : <>
         <span className="eyebrow">Multiplayer Euchre</span><h1>Pull up a chair.</h1><p>Create a private table or enter a six-character invite code.</p>
-        <button className="primary-button" disabled={pending} onClick={() => void run(() => createRoomFn())}>Create a table</button>
+        <button className="primary-button" disabled={pending} onClick={() => setSetupMode('multiplayer')}>Create a table</button>
         <form className="join-form" onSubmit={(event) => { event.preventDefault(); void run(() => joinRoomFn({ data: { code } })) }}><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="INVITE" maxLength={6} required /><button className="quiet-button" disabled={pending}>Join</button></form>
         <button className="quiet-button" disabled={pending} onClick={() => setMode(null)}>Back to game modes</button>
       </>}
@@ -187,6 +230,29 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
   const isTurn = !pending && room.status === 'playing' && game.activePlayer === viewer
   const hand = sortHand(game.hand, game.trump)
   const legal = game.phase === 'playing' && game.trump ? new Set(legalCards(game.hand, game.trick, game.trump).map((card) => card.id)) : new Set<string>()
+  const previousGame = useRef(game)
+  const exchangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [farmerExchange, setFarmerExchange] = useState<{ cards: Card[]; player: Player; retainedIds: string[] } | null>(null)
+
+  useLayoutEffect(() => {
+    const previous = previousGame.current
+    previousGame.current = game
+    if (previous.phase !== 'exchanging' || game.exchangedPlayer === null || previous.exchangedPlayer === game.exchangedPlayer) return
+
+    const player = relativePlayer(game.exchangedPlayer, viewer)
+    const cards = game.exchangedPlayer === viewer
+      ? previous.hand.filter((card) => card.rank === '9' || card.rank === '10').filter((card, _, lowCards) => lowCards.filter(({ rank }) => rank === card.rank).length === 3)
+      : []
+    const exchangedIds = new Set(cards.map((card) => card.id))
+    setFarmerExchange({ cards, player, retainedIds: previous.hand.filter((card) => !exchangedIds.has(card.id)).map((card) => card.id) })
+    if (exchangeTimer.current) clearTimeout(exchangeTimer.current)
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    exchangeTimer.current = setTimeout(() => setFarmerExchange(null), reducedMotion ? 220 : 560)
+  }, [game, viewer])
+
+  useEffect(() => () => {
+    if (exchangeTimer.current) clearTimeout(exchangeTimer.current)
+  }, [])
 
   async function act(action: GameAction) {
     setPending(true)
@@ -216,15 +282,17 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
     }
   }
 
-  const controls = isTurn && (game.phase === 'ordering' || game.phase === 'calling')
+  const controls = isTurn && (game.phase === 'exchanging' || game.phase === 'ordering' || game.phase === 'calling')
   const availableSuits = SUITS.filter((suit) => game.phase === 'calling' && suit !== game.upCard.suit && (!game.rules.requireNaturalTrump || hasNaturalTrump(game.hand, suit)))
+  const exchangeRestricted = game.exchangedPlayer === viewer && !(game.phase === 'calling' && game.rules.stickDealer && viewer === game.dealer)
   const handStatus = <div className="hand-turn-status"><div className="hand-turn-label"><i className={`status-light ${isTurn ? 'your-turn' : ''}`} /><span className="eyebrow">{room.status === 'paused' ? 'Game paused' : isTurn ? 'Your turn' : 'At the table'}</span></div><strong>{error || game.notice}</strong></div>
-  const bidControls = controls && <div className="bid-controls">{game.phase === 'ordering' ? <><button className="primary-button" disabled={game.rules.requireNaturalTrump && !hasNaturalTrump(game.hand, game.upCard.suit)} onClick={() => void act({ type: 'order-up', alone })}>Order up</button><button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button></> : <><div className="suit-buttons">{availableSuits.map((suit) => <button className={suit === 'hearts' || suit === 'diamonds' ? 'red' : ''} key={suit} onClick={() => void act({ type: 'call-trump', suit, alone })} aria-label={`Call ${suit}`}>{SUIT_SYMBOL[suit]}</button>)}</div>{canPassCalling(game.rules.stickDealer, game.activePlayer === game.dealer, availableSuits.length) && <button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button>}</>}<label className="alone-toggle"><input type="checkbox" checked={alone} onChange={(event) => setAlone(event.target.checked)} />Go alone</label></div>
+  const bidControls = controls && <div className="bid-controls">{game.phase === 'exchanging' ? <><button className="primary-button" onClick={() => void act({ type: 'exchange-kitty' })}>Swap with kitty</button><button className="quiet-button" onClick={() => void act({ type: 'decline-exchange' })}>Keep hand</button></> : game.phase === 'ordering' ? <><button className="primary-button" disabled={exchangeRestricted || (game.rules.requireNaturalTrump && !hasNaturalTrump(game.hand, game.upCard.suit))} onClick={() => void act({ type: 'order-up', alone })}>Order up</button><button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button></> : <><div className="suit-buttons">{availableSuits.map((suit) => <button disabled={exchangeRestricted} className={suit === 'hearts' || suit === 'diamonds' ? 'red' : ''} key={suit} onClick={() => void act({ type: 'call-trump', suit, alone })} aria-label={`Call ${suit}`}>{SUIT_SYMBOL[suit]}</button>)}</div>{canPassCalling(game.rules.stickDealer, game.activePlayer === game.dealer, availableSuits.length) && <button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button>}</>}{game.phase !== 'exchanging' && <label className="alone-toggle"><input type="checkbox" checked={alone} disabled={exchangeRestricted} onChange={(event) => setAlone(event.target.checked)} />Go alone</label>}</div>
   return <div className="game-shell">
     <header className="app-header"><Brand /><div className="room-meta"><span className="eyebrow">{singlePlayer ? 'Single player' : 'Table'}</span>{!singlePlayer && <button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/games/${room.code}`)}>{room.code}</button>}</div><div className="header-actions"><HowToPlay />{singlePlayer && <button className="quiet-button" onClick={() => setConfirmLeave(true)}>Leave game</button>}<button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
     <div className="match-layout">
       <aside className="score-panel"><div className="score-heading"><div><span className="eyebrow">Match to 10</span><h1>Score</h1></div><span className="hand-count">Hand {game.handNumber}</span></div><FiveScore score={game.score[0]} team={0} isViewer={viewerTeam === 0} /><FiveScore score={game.score[1]} team={1} isViewer={viewerTeam === 1} /><div className="hand-status"><span>Tricks</span><strong>{game.tricks[viewerTeam]}–{game.tricks[opponentTeam]}</strong></div></aside>
       <main className="table-wrap"><section className="felt-table">
+        {farmerExchange && <FarmerExchange cards={farmerExchange.cards} player={farmerExchange.player} />}
         {([0, 1, 2, 3] as Player[]).map((relative) => {
           const player = playerAt(viewer, relative)
           const occupant = room.seats.find((seat) => seat.seat === player)
@@ -232,10 +300,11 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
           const badge = <PlayerBadge occupant={occupant} active={game.activePlayer === player} dealer={game.dealer === player} maker={game.maker === player} lone={game.lonePlayer === player} tricks={game.playerTricks[player]} />
           return <div className={`seat seat-${position}`} key={player}>{relative === 0 ? <><div className="hand-zone">{handStatus}<div className="human-hand">{hand.map((card) => {
             const playable = isTurn && (game.phase === 'discarding' || legal.has(card.id))
-            return <CardFace key={card.id} card={card} playable={playable} dimmed={isTurn && !playable} onClick={() => void act({ type: game.phase === 'discarding' ? 'discard' : 'play', cardId: card.id })} />
+            const arrivingFromKitty = farmerExchange?.player === 0 && !farmerExchange.retainedIds.includes(card.id)
+            return <CardFace key={card.id} card={card} playable={playable} dimmed={isTurn && !playable} motionClass={arrivingFromKitty ? 'farmer-card-received' : ''} onClick={() => void act({ type: game.phase === 'discarding' ? 'discard' : 'play', cardId: card.id })} />
           })}</div></div><div className={`player-console ${controls ? 'has-controls' : ''}`}>{badge}{bidControls}</div></> : <>{badge}<HiddenHand count={game.handCounts[player]} /></>}</div>
         })}
-        <div className="table-center">{game.trump && <div className={`trump-chip ${game.trump === 'hearts' || game.trump === 'diamonds' ? 'red' : ''}`}><span>{SUIT_SYMBOL[game.trump]}</span> trump</div>}<div className="trick-area">{game.trick.map((played) => <div key={played.card.id} className={`trick-card trick-player-${relativePlayer(played.player, viewer)}`}><CardFace card={played.card} /></div>)}{game.trick.length === 0 && game.phase === 'ordering' && <div className="up-card"><CardFace card={game.upCard} /></div>}</div></div>
+        <div className="table-center">{game.trump && <div className={`trump-chip ${game.trump === 'hearts' || game.trump === 'diamonds' ? 'red' : ''}`}><span>{SUIT_SYMBOL[game.trump]}</span> trump</div>}<div className="trick-area">{game.trick.map((played) => <div key={played.card.id} className={`trick-card trick-player-${relativePlayer(played.player, viewer)}`}><CardFace card={played.card} /></div>)}{game.trick.length === 0 && (game.phase === 'exchanging' || game.phase === 'ordering') && <div className="up-card"><CardFace card={game.upCard} /></div>}</div></div>
         {!room.disconnectVote && (game.phase === 'hand-over' || game.phase === 'match-over') && <div className="table-result-scrim"><section className="result-dialog" role="dialog" aria-modal="true" aria-labelledby="result-title"><span className="eyebrow">{game.phase === 'match-over' ? 'Match complete' : 'Hand complete'}</span><h2 id="result-title">{game.notice}</h2><div className="result-actions">{room.hostUserId === room.seats.find((seat) => seat.seat === viewer)?.userId ? <button type="button" className="primary-button" onClick={() => void act({ type: game.phase === 'hand-over' ? 'next-hand' : 'new-match' })}>{game.phase === 'hand-over' ? 'Next hand' : 'Play again'}</button> : <p>Waiting for the host to continue.</p>}</div></section></div>}
       </section>
       </main>

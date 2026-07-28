@@ -17,16 +17,18 @@ export type GameRules = {
   stickDealer: boolean
   requireNaturalTrump: boolean
   allowAloneWhenOrderingPartner: boolean
+  allowFarmersHand: boolean
 }
 
 export const DEFAULT_RULES: GameRules = {
   stickDealer: true,
   requireNaturalTrump: true,
   allowAloneWhenOrderingPartner: false,
+  allowFarmersHand: false,
 }
 
 export type GameState = {
-  phase: 'ordering' | 'calling' | 'discarding' | 'playing' | 'trick-complete' | 'hand-over' | 'match-over'
+  phase: 'exchanging' | 'ordering' | 'calling' | 'discarding' | 'playing' | 'trick-complete' | 'hand-over' | 'match-over'
   dealer: Player
   activePlayer: Player
   hands: [Card[], Card[], Card[], Card[]]
@@ -35,6 +37,7 @@ export type GameState = {
   trump: Suit | null
   maker: Player | null
   lonePlayer: Player | null
+  exchangedPlayer: Player | null
   trick: PlayedCard[]
   tricks: [number, number]
   playerTricks: [number, number, number, number]
@@ -46,6 +49,8 @@ export type GameState = {
 }
 
 export type GameAction =
+  | { type: 'exchange-kitty' }
+  | { type: 'decline-exchange' }
   | { type: 'pass' }
   | { type: 'order-up'; alone?: boolean }
   | { type: 'call-trump'; suit: Suit; alone?: boolean }
@@ -125,6 +130,12 @@ function nextActive(player: Player, lonePlayer: Player | null): Player {
   return candidate
 }
 
+function farmersHandRank(hand: readonly Card[]): Extract<Rank, '9' | '10'> | null {
+  if (hand.filter((card) => card.rank === '9').length === 3) return '9'
+  if (hand.filter((card) => card.rank === '10').length === 3) return '10'
+  return null
+}
+
 function deal(dealer: Player, score: [number, number], handNumber: number, rules: GameRules, deck = shuffle(createDeck())): GameState {
   if (deck.length !== 24) throw new Error('A Euchre deck must contain exactly 24 cards.')
   const hands: [Card[], Card[], Card[], Card[]] = [[], [], [], []]
@@ -137,10 +148,14 @@ function deal(dealer: Player, score: [number, number], handNumber: number, rules
   }
   const kitty = deck.slice(cursor)
   const upCard = kitty[0]
+  const firstBidder = next(dealer)
+  const exchangingPlayer = rules.allowFarmersHand
+    ? ([0, 1, 2, 3] as const).map((offset) => ((firstBidder + offset) % 4) as Player).find((player) => farmersHandRank(hands[player]) !== null) ?? null
+    : null
   return {
-    phase: 'ordering', dealer, activePlayer: next(dealer), hands, kitty, upCard,
-    trump: null, maker: null, lonePlayer: null, trick: [], tricks: [0, 0], playerTricks: [0, 0, 0, 0], score,
-    handNumber, lastTrickWinner: null, notice: `${upCard.rank} of ${upCard.suit} is turned up.`, rules: { ...rules },
+    phase: exchangingPlayer === null ? 'ordering' : 'exchanging', dealer, activePlayer: exchangingPlayer ?? firstBidder, hands, kitty, upCard,
+    trump: null, maker: null, lonePlayer: null, exchangedPlayer: null, trick: [], tricks: [0, 0], playerTricks: [0, 0, 0, 0], score,
+    handNumber, lastTrickWinner: null, notice: exchangingPlayer === null ? `${upCard.rank} of ${upCard.suit} is turned up.` : `Player ${exchangingPlayer + 1} may exchange a farmer's hand.`, rules: { ...rules },
   }
 }
 
@@ -179,6 +194,29 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
     return state.tricks[0] + state.tricks[1] === 5 ? scoreHand(collected) : collected
   }
 
+  if (action.type === 'decline-exchange' && state.phase === 'exchanging') {
+    return { ...state, phase: 'ordering', activePlayer: next(state.dealer), notice: `${state.upCard.rank} of ${state.upCard.suit} is turned up.` }
+  }
+
+  if (action.type === 'exchange-kitty' && state.phase === 'exchanging') {
+    const rank = farmersHandRank(state.hands[state.activePlayer])
+    if (rank === null || state.kitty.length !== 4) return state
+    const hand = state.hands[state.activePlayer]
+    const exchanged = hand.filter((card) => card.rank === rank).slice(0, 3)
+    const exchangedIds = new Set(exchanged.map((card) => card.id))
+    const hands = state.hands.map((cards) => [...cards]) as GameState['hands']
+    hands[state.activePlayer] = [...hand.filter((card) => !exchangedIds.has(card.id)), ...state.kitty.slice(1)]
+    return {
+      ...state,
+      phase: 'ordering',
+      activePlayer: next(state.dealer),
+      hands,
+      kitty: [state.upCard, ...exchanged],
+      exchangedPlayer: state.activePlayer,
+      notice: `Player ${state.activePlayer + 1} exchanges a farmer's hand.`,
+    }
+  }
+
   if (action.type === 'pass' && (state.phase === 'ordering' || state.phase === 'calling')) {
     if (state.phase === 'calling' && state.activePlayer === state.dealer) {
       if (!state.rules.stickDealer) return deal(next(state.dealer), state.score, state.handNumber, state.rules)
@@ -195,6 +233,7 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
   }
 
   if (action.type === 'order-up' && state.phase === 'ordering') {
+    if (state.exchangedPlayer === state.activePlayer) return state
     const trump = state.upCard.suit
     if (state.rules.requireNaturalTrump && !hasNaturalTrump(state.hands[state.activePlayer], trump)) return state
     const orderingPartner = state.activePlayer !== state.dealer && teamOf(state.activePlayer) === teamOf(state.dealer)
@@ -206,7 +245,7 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
     return { ...ordered, phase: 'discarding', activePlayer: state.dealer, notice: 'Dealer must discard.' }
   }
 
-  if (action.type === 'call-trump' && state.phase === 'calling' && action.suit !== state.upCard.suit && (!state.rules.requireNaturalTrump || hasNaturalTrump(state.hands[state.activePlayer], action.suit))) {
+  if (action.type === 'call-trump' && state.phase === 'calling' && action.suit !== state.upCard.suit && (state.exchangedPlayer !== state.activePlayer || (state.rules.stickDealer && state.activePlayer === state.dealer)) && (!state.rules.requireNaturalTrump || hasNaturalTrump(state.hands[state.activePlayer], action.suit))) {
     return beginPlay({ ...state, trump: action.suit, maker: state.activePlayer, lonePlayer: action.alone ? state.activePlayer : null })
   }
 
@@ -311,10 +350,12 @@ function chooseCard(state: GameState): Card {
 }
 
 export function chooseBotAction(state: GameState): GameAction | null {
+  if (state.phase === 'exchanging') return { type: 'exchange-kitty' }
   if (state.phase === 'discarding' && state.trump !== null) {
     return { type: 'discard', cardId: weakest(state.hands[state.dealer], state.trump).id }
   }
   if (state.phase === 'ordering') {
+    if (state.exchangedPlayer === state.activePlayer) return { type: 'pass' }
     if (state.rules.requireNaturalTrump && !hasNaturalTrump(state.hands[state.activePlayer], state.upCard.suit)) return { type: 'pass' }
     const hand = state.activePlayer === state.dealer
       ? [...state.hands[state.activePlayer], state.upCard]
@@ -328,6 +369,7 @@ export function chooseBotAction(state: GameState): GameAction | null {
       : { type: 'pass' }
   }
   if (state.phase === 'calling') {
+    if (state.exchangedPlayer === state.activePlayer && (!state.rules.stickDealer || state.activePlayer !== state.dealer)) return { type: 'pass' }
     const available = SUITS.filter((suit) => suit !== state.upCard.suit && (!state.rules.requireNaturalTrump || hasNaturalTrump(state.hands[state.activePlayer], suit)))
     if (available.length === 0) return { type: 'pass' }
     const best = available

@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { Effect } from 'effect'
-import { SUITS, type GameAction } from '../game'
+import { SUITS, type GameAction, type GameRules } from '../game'
 import type { PlayerAction } from '../multiplayer'
 import { authMiddleware } from '../lib/auth.middleware'
 import { GameService, gameRuntime } from './game-service.server'
@@ -17,10 +17,25 @@ function text(value: unknown, name: string): string {
 
 const roomIdInput = (value: unknown) => ({ roomId: text(object(value).roomId, 'room ID') })
 
+function rulesInput(value: unknown): GameRules {
+  const rules = object(object(value).rules)
+  if (typeof rules.stickDealer !== 'boolean' || typeof rules.requireNaturalTrump !== 'boolean' || typeof rules.allowAloneWhenOrderingPartner !== 'boolean' || typeof rules.allowFarmersHand !== 'boolean') {
+    throw new Error('Invalid game rules.')
+  }
+  return {
+    stickDealer: rules.stickDealer,
+    requireNaturalTrump: rules.requireNaturalTrump,
+    allowAloneWhenOrderingPartner: rules.allowAloneWhenOrderingPartner,
+    allowFarmersHand: rules.allowFarmersHand,
+  }
+}
+
 function action(value: unknown): PlayerAction | { type: 'next-hand' } | { type: 'new-match' } {
   const input = object(value)
   switch (input.type) {
     case 'pass':
+    case 'exchange-kitty':
+    case 'decline-exchange':
     case 'next-hand':
     case 'new-match':
       return { type: input.type }
@@ -40,11 +55,13 @@ function action(value: unknown): PlayerAction | { type: 'next-hand' } | { type: 
 
 export const createRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createRoom(context.session.user.id))))
+  .validator(rulesInput)
+  .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createRoom(context.session.user.id, data))))
 
 export const createSinglePlayerRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createSinglePlayerRoom(context.session.user.id))))
+  .validator(rulesInput)
+  .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createSinglePlayerRoom(context.session.user.id, data))))
 
 export const getCurrentRoomFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])

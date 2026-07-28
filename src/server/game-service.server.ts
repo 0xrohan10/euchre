@@ -2,7 +2,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, ManagedRuntime } from 'effect'
 import { db } from '../db/index.server'
 import { disconnectVote, room, roomCommand, roomSeat, user } from '../db/schema'
-import { createGame, DEFAULT_RULES, reduceGame, type GameAction, type Player } from '../game'
+import { createGame, reduceGame, type GameAction, type GameRules, type Player } from '../game'
 import { acceptsRoomAction, advanceBot, eligibleBotVoters, projectGame, statusForGame, statusForPresence, type PlayerAction, type RoomView, type SeatView } from '../multiplayer'
 
 export class GameServiceError extends Data.TaggedError('GameServiceError')<{
@@ -18,8 +18,8 @@ type SubmitCommand = {
 }
 
 type GameServiceShape = {
-  createRoom: (userId: string) => Effect.Effect<RoomView, GameServiceError>
-  createSinglePlayerRoom: (userId: string) => Effect.Effect<RoomView, GameServiceError>
+  createRoom: (userId: string, rules: GameRules) => Effect.Effect<RoomView, GameServiceError>
+  createSinglePlayerRoom: (userId: string, rules: GameRules) => Effect.Effect<RoomView, GameServiceError>
   currentRoom: (userId: string) => Effect.Effect<RoomView | null, GameServiceError>
   joinRoom: (userId: string, code: string) => Effect.Effect<RoomView, GameServiceError>
   leaveRoom: (userId: string, roomId: string) => Effect.Effect<void, GameServiceError>
@@ -149,21 +149,21 @@ const GameServiceLive = Layer.succeed(GameService, GameService.of({
     }),
     catch: failure,
   })),
-  createRoom: Effect.fn('GameService.createRoom')((userId: string) => Effect.tryPromise({
+  createRoom: Effect.fn('GameService.createRoom')((userId: string, rules: GameRules) => Effect.tryPromise({
     try: () => db.transaction(async (tx) => {
-        const [created] = await tx.insert(room).values({ code: randomCode(), hostUserId: userId, rules: DEFAULT_RULES }).returning()
+        const [created] = await tx.insert(room).values({ code: randomCode(), hostUserId: userId, rules }).returning()
         await tx.insert(roomSeat).values({ roomId: created.id, seat: 0, userId, connected: true })
         return viewRoom(userId, created.id, tx)
       }),
     catch: failure,
   })),
-  createSinglePlayerRoom: Effect.fn('GameService.createSinglePlayerRoom')((userId: string) => Effect.tryPromise({
+  createSinglePlayerRoom: Effect.fn('GameService.createSinglePlayerRoom')((userId: string, rules: GameRules) => Effect.tryPromise({
     try: () => db.transaction(async (tx) => {
-        const game = createGame(undefined, DEFAULT_RULES)
+        const game = createGame(undefined, rules)
         const [created] = await tx.insert(room).values({
           code: randomCode(),
           hostUserId: userId,
-          rules: DEFAULT_RULES,
+          rules,
           status: 'playing',
           game,
         }).returning()

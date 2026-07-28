@@ -35,7 +35,7 @@ describe('Euchre rules', () => {
   it('prevents reneging when the player can follow suit', () => {
     const state: GameState = {
       phase: 'playing', dealer: 3, activePlayer: 0, hands: [[card('9', 'clubs'), card('A', 'hearts')], [], [], []],
-      kitty: [], upCard: card('9', 'spades'), trump: 'spades', maker: 0, lonePlayer: null,
+      kitty: [], upCard: card('9', 'spades'), trump: 'spades', maker: 0, lonePlayer: null, exchangedPlayer: null,
       trick: [{ player: 3, card: card('A', 'clubs') }], tricks: [0, 0], playerTricks: [0, 0, 0, 0], score: [0, 0], handNumber: 1,
       lastTrickWinner: null, notice: '', rules: { ...DEFAULT_RULES },
     }
@@ -47,6 +47,45 @@ describe('Euchre rules', () => {
     expect(game.hands.flat()).toHaveLength(20)
     expect(game.kitty).toHaveLength(4)
     expect(createDeck()).toHaveLength(24)
+  })
+
+  it("exchanges the first eligible farmer's hand for the face-down kitty", () => {
+    const farmerCards = [card('9', 'clubs'), card('9', 'diamonds'), card('9', 'hearts')]
+    const secondFarmerCards = [card('10', 'clubs'), card('10', 'diamonds'), card('10', 'hearts')]
+    const reserved = [...farmerCards, ...secondFarmerCards]
+    const remaining = createDeck().filter((candidate) => !reserved.some(({ id }) => id === candidate.id))
+    const hands = [
+      [...farmerCards, ...remaining.splice(0, 2)],
+      [...secondFarmerCards, ...remaining.splice(0, 2)],
+      remaining.splice(0, 5),
+      remaining.splice(0, 5),
+    ]
+    const deck = Array.from({ length: 5 }, (_, round) => hands.map((hand) => hand[round])).flat().concat(remaining)
+    const game = createGame(deck, { ...DEFAULT_RULES, allowFarmersHand: true })
+
+    expect(game.phase).toBe('exchanging')
+    expect(game.activePlayer).toBe(0)
+    const faceDownKitty = game.kitty.slice(1)
+    const exchanged = reduceGame(game, { type: 'exchange-kitty' })
+    expect(exchanged.phase).toBe('ordering')
+    expect(exchanged.activePlayer).toBe(0)
+    expect(exchanged.exchangedPlayer).toBe(0)
+    expect(exchanged.hands[0]).toEqual(expect.arrayContaining(faceDownKitty))
+    expect(exchanged.hands[0].filter(({ rank }) => rank === '9')).toHaveLength(0)
+    expect(exchanged.kitty.slice(1)).toEqual(farmerCards)
+    expect(reduceGame(exchanged, { type: 'order-up' })).toBe(exchanged)
+  })
+
+  it("requires a player who exchanged a farmer's hand to pass unless stuck as dealer", () => {
+    const game = createGame(createDeck(), { ...DEFAULT_RULES, allowFarmersHand: true })
+    const restricted = { ...game, phase: 'calling' as const, activePlayer: 0 as const, exchangedPlayer: 0 as const }
+    restricted.upCard = card('9', 'clubs')
+    restricted.hands[0] = [card('A', 'hearts')]
+    expect(reduceGame(restricted, { type: 'call-trump', suit: 'hearts' })).toBe(restricted)
+
+    const stuckDealer = { ...restricted, activePlayer: 3 as const, exchangedPlayer: 3 as const }
+    stuckDealer.hands[3] = [card('A', 'hearts')]
+    expect(reduceGame(stuckDealer, { type: 'call-trump', suit: 'hearts' }).phase).toBe('playing')
   })
 
   it('does not let the dealer pass in the second bidding round', () => {
@@ -178,7 +217,7 @@ describe('Euchre rules', () => {
     const state: GameState = {
       phase: 'playing', dealer: 3, activePlayer: 3,
       hands: [[], [], [], [card('J', 'clubs')]], kitty: [], upCard: card('9', 'clubs'),
-      trump: 'clubs', maker: 0, lonePlayer: null,
+      trump: 'clubs', maker: 0, lonePlayer: null, exchangedPlayer: null,
       trick: [
         { player: 0, card: card('A', 'hearts') },
         { player: 1, card: card('9', 'hearts') },
