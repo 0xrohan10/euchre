@@ -1,6 +1,7 @@
 import type { Card, PlayedCard, Suit } from './card'
-import type { Player } from './player'
+import type { Player, Team } from './player'
 import type { GameRules } from './rules'
+import type { HandResult, RatingMode } from './skill'
 
 export type GameState = {
   phase:
@@ -30,6 +31,13 @@ export type GameState = {
   lastTrickWinner: Player | null
   notice: string
   rules: GameRules
+  handResults?: HandResult[]
+  initialHands?: [Card[], Card[], Card[], Card[]]
+  ratingEvidenceComplete?: boolean
+  ratingMode?: RatingMode
+  ratingParticipants?: [string | null, string | null, string | null, string | null]
+  ratingForfeitTeam?: Team
+  ratingBotSeats?: [boolean, boolean, boolean, boolean]
 }
 
 export function emptyWonTricks(): GameState['wonTricks'] {

@@ -69,8 +69,7 @@ If migrate fails, the build fails and the new Worker is not deployed.
 ### Manual deploy
 
 ```bash
-DATABASE_URL='postgresql://...' bun run db:migrate
-bun run deploy
+DATABASE_URL='postgresql://...' bun run deploy
 bunx wrangler tail
 ```
 

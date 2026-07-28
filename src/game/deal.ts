@@ -3,6 +3,16 @@ import { type Player, next } from './player'
 import { type GameRules, DEFAULT_RULES } from './rules'
 import { emptyWonTricks, type GameState } from './state'
 
+type MatchEvidence = Pick<
+  GameState,
+  | 'handResults'
+  | 'ratingEvidenceComplete'
+  | 'ratingMode'
+  | 'ratingParticipants'
+  | 'ratingForfeitTeam'
+  | 'ratingBotSeats'
+>
+
 export function farmersHandRank(hand: readonly Card[]): Extract<Rank, '9' | '10'> | null {
   if (
     hand.filter((card) => {
@@ -27,6 +37,10 @@ export function deal(
   handNumber: number,
   rules: GameRules,
   deck = shuffle(createDeck()),
+  matchEvidence: MatchEvidence = {
+    handResults: [],
+    ratingEvidenceComplete: true,
+  },
 ): GameState {
   if (deck.length !== 24) {
     throw new Error('A Euchre deck must contain exactly 24 cards.')
@@ -59,6 +73,9 @@ export function deal(
     dealer,
     activePlayer: exchangingPlayer ?? firstBidder,
     hands,
+    initialHands: hands.map((hand) => {
+      return [...hand]
+    }) as GameState['hands'],
     kitty,
     upCard,
     trump: null,
@@ -77,6 +94,7 @@ export function deal(
         ? `${upCard.rank} of ${upCard.suit} is turned up.`
         : `Player ${exchangingPlayer + 1} may exchange a farmer's hand.`,
     rules: { ...rules },
+    ...matchEvidence,
   }
 }
 

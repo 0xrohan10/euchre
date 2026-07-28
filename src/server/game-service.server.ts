@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, ManagedRuntime } from 'effect'
 import { db } from '../db/index.server'
 import {
@@ -7,6 +7,9 @@ import {
   gameHistoryParticipant,
   party,
   partyMember,
+  pendingRating,
+  playerRating,
+  ratedMatch,
   rematchVote,
   room,
   roomCommand,
@@ -14,10 +17,16 @@ import {
   user,
 } from '../db/schema'
 import { createGame } from '../game/deal'
-import type { Player } from '../game/player'
+import { teamOf, type Player } from '../game/player'
 import type { GameHistorySeat, GameHistorySummary } from '../game/history'
 import { reduceGame } from '../game/reduce'
 import type { GameRules } from '../game/rules'
+import {
+  BASE_SKILL_RATING,
+  calculateRatingUpdates,
+  type RatingMode,
+  type RatingSeat,
+} from '../game/skill'
 import type { GameAction, GameState } from '../game/state'
 import {
   acceptsRoomAction,
@@ -110,7 +119,20 @@ function randomCode(): string {
 }
 
 type RoomReader = Pick<typeof db, 'select'>
-type HistoryWriter = Pick<typeof db, 'insert' | 'select'>
+type HistoryWriter = Pick<typeof db, 'delete' | 'insert' | 'select' | 'update'>
+type CompletedRoom = Pick<typeof room.$inferSelect, 'id' | 'matchId' | 'rules'>
+type CompletedGame = Pick<
+  GameState,
+  | 'handNumber'
+  | 'handResults'
+  | 'phase'
+  | 'ratingEvidenceComplete'
+  | 'ratingForfeitTeam'
+  | 'ratingMode'
+  | 'ratingParticipants'
+  | 'score'
+>
+type HistorySeatInput = Pick<typeof roomSeat.$inferSelect, 'controller' | 'seat' | 'userId'>
 type TickSeat = Pick<
   typeof roomSeat.$inferSelect,
   'userId' | 'seat' | 'connected' | 'controller' | 'lastSeenAt'
@@ -120,35 +142,105 @@ type RoomViewSeat = Pick<
   'seat' | 'userId' | 'controller' | 'connected'
 > & { name: string | null }
 
-async function recordCompletedMatch(
-  record: typeof room.$inferSelect,
+function ratingModeForSeats(
+  seats: readonly Pick<typeof roomSeat.$inferSelect, 'userId' | 'controller'>[],
+): RatingMode {
+  return seats.length < 4 ||
+    seats.every((seat) => {
+      return seat.userId !== null && seat.controller === 'human'
+    })
+    ? 'competitive'
+    : 'assisted'
+}
+
+function withRatingContext(
   game: GameState,
-  seats: (typeof roomSeat.$inferSelect)[],
+  seats: readonly Pick<
+    typeof roomSeat.$inferSelect,
+    'seat' | 'userId' | 'controller' | 'connected'
+  >[],
+): GameState {
+  const participants: NonNullable<GameState['ratingParticipants']> = [null, null, null, null]
+  for (const seat of seats) {
+    participants[seat.seat as Player] =
+      seat.controller === 'human' && seat.connected ? seat.userId : null
+  }
+  return {
+    ...game,
+    ratingMode: ratingModeForSeats(seats),
+    ratingParticipants: participants,
+    ratingBotSeats: [false, false, false, false],
+  }
+}
+
+function enrollRatingParticipant(
+  game: GameState | null,
+  seat: Pick<typeof roomSeat.$inferSelect, 'seat' | 'userId' | 'controller' | 'connected'>,
+): GameState | null {
+  if (
+    !game ||
+    !seat.userId ||
+    !seat.connected ||
+    seat.controller !== 'human' ||
+    !game.ratingParticipants ||
+    game.ratingParticipants[seat.seat as Player] ||
+    game.ratingBotSeats?.[seat.seat as Player]
+  ) {
+    return game
+  }
+  const participants = [...game.ratingParticipants] as NonNullable<GameState['ratingParticipants']>
+  participants[seat.seat as Player] = seat.userId
+  return { ...game, ratingParticipants: participants }
+}
+
+async function recordCompletedMatch(
+  record: CompletedRoom,
+  game: CompletedGame,
+  seats: HistorySeatInput[],
   database: HistoryWriter = db,
 ) {
   if (game.phase !== 'match-over') {
     return
   }
-  const userIds = seats.flatMap((seat) => {
-    return seat.userId ? [seat.userId] : []
-  })
+  const fallbackParticipants: NonNullable<GameState['ratingParticipants']> = [
+    null,
+    null,
+    null,
+    null,
+  ]
+  for (const seat of seats) {
+    fallbackParticipants[seat.seat as Player] = seat.userId
+  }
+  const participantIds = game.ratingParticipants ?? fallbackParticipants
+  const candidateUserIds = [
+    ...new Set(
+      participantIds.flatMap((userId) => {
+        return userId ? [userId] : []
+      }),
+    ),
+  ].sort()
   const players =
-    userIds.length > 0
+    candidateUserIds.length > 0
       ? await database
           .select({ id: user.id, name: user.name })
           .from(user)
-          .where(inArray(user.id, userIds))
+          .where(inArray(user.id, candidateUserIds))
+          .orderBy(user.id)
       : []
+  const userIds = players.map((player) => {
+    return player.id
+  })
   const names = new Map(
     players.map((player) => {
       return [player.id, player.name]
     }),
   )
   const historySeats: GameHistorySeat[] = seats.map((seat) => {
+    const participantId = participantIds[seat.seat as Player]
     return {
       seat: seat.seat,
-      userId: seat.userId,
-      name: (seat.userId && names.get(seat.userId)) || `Bot ${seat.seat}`,
+      userId: participantId && names.has(participantId) ? participantId : null,
+      name: (participantId && names.get(participantId)) || `Bot ${seat.seat}`,
       controller: seat.controller,
     }
   })
@@ -165,11 +257,168 @@ async function recordCompletedMatch(
     })
     .onConflictDoNothing({ target: gameHistory.sourceMatchId })
     .returning({ id: gameHistory.id })
+  const [historyRecord] = created
+    ? [{ ...created, seats: historySeats }]
+    : await database
+        .select({ id: gameHistory.id, seats: gameHistory.seats })
+        .from(gameHistory)
+        .where(eq(gameHistory.sourceMatchId, record.matchId))
+        .limit(1)
+  if (!historyRecord) {
+    throw new Error('Completed match history could not be claimed.')
+  }
   if (created && userIds.length > 0) {
     await database.insert(gameHistoryParticipant).values(
       userIds.map((userId) => {
         return { gameHistoryId: created.id, userId }
       }),
+    )
+  }
+
+  const ratedParticipantIds: NonNullable<GameState['ratingParticipants']> =
+    created || game.ratingParticipants ? participantIds : [null, null, null, null]
+  if (!created && !game.ratingParticipants) {
+    for (const seat of historyRecord.seats) {
+      ratedParticipantIds[seat.seat as Player] = seat.userId
+    }
+  }
+  const ratedCandidateUserIds = [
+    ...new Set(
+      ratedParticipantIds.flatMap((userId) => {
+        return userId ? [userId] : []
+      }),
+    ),
+  ].sort()
+  const ratedPlayers = created
+    ? players
+    : ratedCandidateUserIds.length > 0
+      ? await database
+          .select({ id: user.id, name: user.name })
+          .from(user)
+          .where(inArray(user.id, ratedCandidateUserIds))
+          .orderBy(user.id)
+      : []
+  const ratedUserIds = ratedPlayers.map((player) => {
+    return player.id
+  })
+  const ratedNames = new Set(ratedUserIds)
+
+  const [ratingClaim] = await database
+    .insert(ratedMatch)
+    .values({ gameHistoryId: historyRecord.id })
+    .onConflictDoNothing()
+    .returning({ gameHistoryId: ratedMatch.gameHistoryId })
+  if (ratingClaim && ratedUserIds.length > 0) {
+    const mode = game.ratingMode ?? 'assisted'
+    await database
+      .insert(playerRating)
+      .values(
+        ratedUserIds.map((userId) => {
+          return { userId, mode }
+        }),
+      )
+      .onConflictDoNothing()
+    const currentRatings = await database
+      .select({
+        userId: playerRating.userId,
+        rating: playerRating.rating,
+        gamesPlayed: playerRating.gamesPlayed,
+      })
+      .from(playerRating)
+      .where(and(eq(playerRating.mode, mode), inArray(playerRating.userId, ratedUserIds)))
+      .orderBy(playerRating.userId)
+      .for('update')
+    const ratingsByUser = new Map(
+      currentRatings.map((rating) => {
+        return [rating.userId, rating]
+      }),
+    )
+    const ratingSeats: RatingSeat[] = ratedParticipantIds.map((userId, seat) => {
+      const validUserId = userId && ratedNames.has(userId) ? userId : null
+      const current = validUserId ? ratingsByUser.get(validUserId) : undefined
+      return {
+        seat: seat as Player,
+        userId: validUserId,
+        rating: current?.rating ?? BASE_SKILL_RATING,
+        gamesPlayed: current?.gamesPlayed ?? 0,
+      }
+    })
+    const winner =
+      game.ratingForfeitTeam === undefined
+        ? ((game.score[0] > game.score[1] ? 0 : 1) as 0 | 1)
+        : ((1 - game.ratingForfeitTeam) as 0 | 1)
+    const completeHands =
+      game.ratingEvidenceComplete && game.handResults?.length === game.handNumber
+        ? game.handResults
+        : []
+    const updates = calculateRatingUpdates(ratingSeats, completeHands, winner)
+    for (const update of updates) {
+      await database
+        .update(playerRating)
+        .set({
+          rating: sql`${playerRating.rating} + ${update.ratingDelta}`,
+          gamesPlayed: sql`${playerRating.gamesPlayed} + 1`,
+          wins: sql`${playerRating.wins} + ${Number(update.won)}`,
+          losses: sql`${playerRating.losses} + ${Number(!update.won)}`,
+          handsPlayed: sql`${playerRating.handsPlayed} + ${update.hands}`,
+          calls: sql`${playerRating.calls} + ${update.calls}`,
+          callsWon: sql`${playerRating.callsWon} + ${update.callsWon}`,
+          partnerCalls: sql`${playerRating.partnerCalls} + ${update.partnerCalls}`,
+          partnerCallsWon: sql`${playerRating.partnerCallsWon} + ${update.partnerCallsWon}`,
+          defenses: sql`${playerRating.defenses} + ${update.defenses}`,
+          defensesWon: sql`${playerRating.defensesWon} + ${update.defensesWon}`,
+          tricksWon: sql`${playerRating.tricksWon} + ${update.tricksWon}`,
+          expectedTricksMilli: sql`${playerRating.expectedTricksMilli} + ${update.expectedTricksMilli}`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(playerRating.userId, update.userId), eq(playerRating.mode, mode)))
+    }
+  }
+  await database.delete(pendingRating).where(eq(pendingRating.gameHistoryId, historyRecord.id))
+}
+
+async function reconcilePendingRating(database: HistoryWriter) {
+  const pendingRecords = await database
+    .select({
+      id: gameHistory.id,
+      sourceRoomId: gameHistory.sourceRoomId,
+      sourceMatchId: gameHistory.sourceMatchId,
+      score0: gameHistory.score0,
+      score1: gameHistory.score1,
+      handCount: gameHistory.handCount,
+      rules: gameHistory.rules,
+      seats: gameHistory.seats,
+      mode: pendingRating.mode,
+      participants: pendingRating.participants,
+      forfeitTeam: pendingRating.forfeitTeam,
+    })
+    .from(pendingRating)
+    .innerJoin(gameHistory, eq(pendingRating.gameHistoryId, gameHistory.id))
+    .orderBy(pendingRating.createdAt)
+  for (const pending of pendingRecords) {
+    await recordCompletedMatch(
+      {
+        id: pending.sourceRoomId ?? `history:${pending.id}`,
+        matchId: pending.sourceMatchId,
+        rules: pending.rules,
+      },
+      {
+        phase: 'match-over',
+        score: [pending.score0, pending.score1],
+        handNumber: pending.handCount,
+        ratingEvidenceComplete: false,
+        ratingMode: pending.mode ?? 'assisted',
+        ratingParticipants: pending.participants ?? undefined,
+        ratingForfeitTeam: pending.forfeitTeam ?? undefined,
+      },
+      pending.seats.map((seat) => {
+        return {
+          seat: seat.seat,
+          userId: seat.userId,
+          controller: seat.controller,
+        }
+      }),
+      database,
     )
   }
 }
@@ -270,6 +519,30 @@ async function viewRoomFromRows(
   const humanSeats = seatRows.filter((seat) => {
     return seat.userId !== null
   })
+  const ratingMode = record.game
+    ? (record.game.ratingMode ?? 'assisted')
+    : ratingModeForSeats(seatRows)
+  const ratingUserIds = humanSeats.flatMap((seat) => {
+    return seat.userId ? [seat.userId] : []
+  })
+  const ratings =
+    ratingUserIds.length === 0
+      ? []
+      : await database
+          .select({
+            userId: playerRating.userId,
+            rating: playerRating.rating,
+            gamesPlayed: playerRating.gamesPlayed,
+          })
+          .from(playerRating)
+          .where(
+            and(eq(playerRating.mode, ratingMode), inArray(playerRating.userId, ratingUserIds)),
+          )
+  const ratingsByUser = new Map(
+    ratings.map((rating) => {
+      return [rating.userId, rating]
+    }),
+  )
   return {
     id: record.id,
     code: record.code,
@@ -280,12 +553,16 @@ async function viewRoomFromRows(
     viewerSeat: viewer.seat as Player,
     rules: record.rules,
     seats: seatRows.map((seat) => {
+      const rating = seat.userId ? ratingsByUser.get(seat.userId) : undefined
       return {
         seat: seat.seat as Player,
         userId: seat.userId,
         name: seat.name ?? `Bot ${seat.seat}`,
         controller: seat.controller,
         connected: seat.connected,
+        rating: seat.userId ? (rating?.rating ?? BASE_SKILL_RATING) : null,
+        ratingGames: rating?.gamesPlayed ?? 0,
+        ratingMode,
       }
     }) satisfies SeatView[],
     game: record.game ? projectGame(record.game, viewer.seat as Player) : null,
@@ -334,28 +611,31 @@ const GameServiceLive = Layer.succeed(
   GameService.of({
     history: Effect.fn('GameService.history')((userId: string) => {
       return Effect.tryPromise({
-        try: async () => {
-          const records = await db
-            .select({
-              id: gameHistory.id,
-              score0: gameHistory.score0,
-              score1: gameHistory.score1,
-              handCount: gameHistory.handCount,
-              rules: gameHistory.rules,
-              seats: gameHistory.seats,
-              completedAt: gameHistory.completedAt,
+        try: () => {
+          return db.transaction(async (tx) => {
+            await reconcilePendingRating(tx)
+            const records = await tx
+              .select({
+                id: gameHistory.id,
+                score0: gameHistory.score0,
+                score1: gameHistory.score1,
+                handCount: gameHistory.handCount,
+                rules: gameHistory.rules,
+                seats: gameHistory.seats,
+                completedAt: gameHistory.completedAt,
+              })
+              .from(gameHistoryParticipant)
+              .innerJoin(gameHistory, eq(gameHistoryParticipant.gameHistoryId, gameHistory.id))
+              .where(eq(gameHistoryParticipant.userId, userId))
+              .orderBy(desc(gameHistory.completedAt))
+              .limit(50)
+            return records.map(({ score0, score1, ...record }) => {
+              return {
+                ...record,
+                score: [score0, score1] as [number, number],
+                winner: (score0 > score1 ? 0 : 1) as 0 | 1,
+              }
             })
-            .from(gameHistoryParticipant)
-            .innerJoin(gameHistory, eq(gameHistoryParticipant.gameHistoryId, gameHistory.id))
-            .where(eq(gameHistoryParticipant.userId, userId))
-            .orderBy(desc(gameHistory.completedAt))
-            .limit(50)
-          return records.map(({ score0, score1, ...record }) => {
-            return {
-              ...record,
-              score: [score0, score1] as [number, number],
-              winner: (score0 > score1 ? 0 : 1) as 0 | 1,
-            }
           })
         },
         catch: failure,
@@ -395,6 +675,7 @@ const GameServiceLive = Layer.succeed(
           // so idle ticks stay consistent and still do not contend with command locks.
           const preflight = await db.transaction(
             async (tx) => {
+              await reconcilePendingRating(tx)
               const now = new Date()
               const [preflightRoom] = await tx
                 .select()
@@ -520,6 +801,10 @@ const GameServiceLive = Layer.succeed(
                 ? { ...seat, connected: false }
                 : seat
             })
+            const currentCaller = currentSeats.find((seat) => {
+              return seat.userId === userId
+            })!
+            const enrolledGame = enrollRatingParticipant(record.game, currentCaller)
             const hasDisconnectedHuman = currentSeats.some((seat) => {
               return !seat.connected && seat.controller === 'human'
             })
@@ -541,21 +826,50 @@ const GameServiceLive = Layer.succeed(
               callerReconnected ||
               staleSeats.length > 0 ||
               status !== record.status ||
-              lockedPolicy.statusRepairDue
+              lockedPolicy.statusRepairDue ||
+              enrolledGame !== record.game
             ) {
-              await tx.update(room).set({ status, updatedAt: lockedNow }).where(eq(room.id, roomId))
+              await tx
+                .update(room)
+                .set({ status, game: enrolledGame, updatedAt: lockedNow })
+                .where(eq(room.id, roomId))
             }
-            if (staleSeats.length === 0 && record.game && status === 'playing') {
+            if (staleSeats.length === 0 && enrolledGame && status === 'playing') {
               const elapsed = lockedNow.getTime() - record.updatedAt.getTime()
-              const game =
-                record.game.phase === 'trick-complete'
+              const botSeat = currentSeats.find((seat) => {
+                return seat.seat === enrolledGame.activePlayer && seat.controller === 'bot'
+              })
+              const botActed =
+                enrolledGame.phase !== 'trick-complete' && elapsed >= 900 && botSeat !== undefined
+              const advanced =
+                enrolledGame.phase === 'trick-complete'
                   ? elapsed >= 1_600
-                    ? reduceGame(record.game, { type: 'collect-trick' })
-                    : record.game
+                    ? reduceGame(enrolledGame, { type: 'collect-trick' })
+                    : enrolledGame
                   : elapsed >= 900
-                    ? advanceBot(record.game, currentSeats)
-                    : record.game
-              if (game !== record.game) {
+                    ? advanceBot(enrolledGame, currentSeats)
+                    : enrolledGame
+              let game = advanced
+              if (botActed && botSeat && advanced !== enrolledGame) {
+                const ratingBotSeats = [
+                  ...(enrolledGame.ratingBotSeats ?? [false, false, false, false]),
+                ] as [boolean, boolean, boolean, boolean]
+                ratingBotSeats[botSeat.seat as Player] = true
+                const replacedParticipant =
+                  enrolledGame.ratingParticipants?.[botSeat.seat as Player]
+                game = {
+                  ...advanced,
+                  ratingBotSeats,
+                  ratingEvidenceComplete: replacedParticipant
+                    ? false
+                    : advanced.ratingEvidenceComplete,
+                  ratingForfeitTeam:
+                    replacedParticipant && advanced.ratingForfeitTeam === undefined
+                      ? teamOf(botSeat.seat as Player)
+                      : advanced.ratingForfeitTeam,
+                }
+              }
+              if (game !== enrolledGame) {
                 await recordCompletedMatch(record, game, currentSeats, tx)
                 await tx
                   .update(room)
@@ -578,6 +892,7 @@ const GameServiceLive = Layer.succeed(
       return Effect.tryPromise({
         try: () => {
           return db.transaction(async (tx) => {
+            await reconcilePendingRating(tx)
             const [seat] = await tx
               .select({ roomId: roomSeat.roomId })
               .from(roomSeat)
@@ -608,6 +923,7 @@ const GameServiceLive = Layer.succeed(
             return viewParty(userId, tx)
           })
           const roomView = await db.transaction(async (tx) => {
+            await reconcilePendingRating(tx)
             const [seat] = await tx
               .select({ roomId: roomSeat.roomId })
               .from(roomSeat)
@@ -730,6 +1046,16 @@ const GameServiceLive = Layer.succeed(
                 return seat.userId === userId
               })
               if (departingSeat) {
+                const departingPlayer = departingSeat.seat as Player
+                const game =
+                  activeRoom.game.ratingParticipants?.[departingPlayer] === userId
+                    ? {
+                        ...activeRoom.game,
+                        ratingEvidenceComplete: false,
+                        ratingForfeitTeam:
+                          activeRoom.game.ratingForfeitTeam ?? teamOf(departingPlayer),
+                      }
+                    : activeRoom.game
                 await tx
                   .update(roomSeat)
                   .set({
@@ -772,12 +1098,13 @@ const GameServiceLive = Layer.succeed(
                       activeRoom.status === 'finished'
                         ? 'finished'
                         : statusForPresence(
-                            statusForGame(activeRoom.game),
-                            activeRoom.game.phase,
+                            statusForGame(game),
+                            game.phase,
                             hasDisconnectedHuman,
                             false,
                           ),
                     version: activeRoom.version + 1,
+                    game,
                     updatedAt: new Date(),
                   })
                   .where(eq(room.id, activeRoom.id))
@@ -841,7 +1168,40 @@ const GameServiceLive = Layer.succeed(
             if (activeRoom) {
               return viewRoom(userId, activeRoom.id, tx)
             }
-            const game = createGame(undefined, rules)
+            const partner = members.find((member) => {
+              return member.userId !== userId
+            })!
+            const seatValues = [
+              {
+                roomId: '',
+                seat: 0,
+                userId,
+                connected: true,
+                controller: 'human' as const,
+              },
+              {
+                roomId: '',
+                seat: 1,
+                userId: null,
+                controller: 'bot' as const,
+                connected: false,
+              },
+              {
+                roomId: '',
+                seat: 2,
+                userId: partner.userId,
+                connected: false,
+                controller: 'human' as const,
+              },
+              {
+                roomId: '',
+                seat: 3,
+                userId: null,
+                controller: 'bot' as const,
+                connected: false,
+              },
+            ]
+            const game = withRatingContext(createGame(undefined, rules), seatValues)
             const [created] = await tx
               .insert(room)
               .values({
@@ -853,9 +1213,6 @@ const GameServiceLive = Layer.succeed(
                 game,
               })
               .returning()
-            const partner = members.find((member) => {
-              return member.userId !== userId
-            })!
             await tx.insert(roomSeat).values([
               { roomId: created.id, seat: 0, userId, connected: true },
               { roomId: created.id, seat: 1, controller: 'bot' },
@@ -890,7 +1247,37 @@ const GameServiceLive = Layer.succeed(
         return Effect.tryPromise({
           try: () => {
             return db.transaction(async (tx) => {
-              const game = createGame(undefined, rules)
+              const seatValues = [
+                {
+                  roomId: '',
+                  seat: 0,
+                  userId,
+                  connected: true,
+                  controller: 'human' as const,
+                },
+                {
+                  roomId: '',
+                  seat: 1,
+                  userId: null,
+                  controller: 'bot' as const,
+                  connected: false,
+                },
+                {
+                  roomId: '',
+                  seat: 2,
+                  userId: null,
+                  controller: 'bot' as const,
+                  connected: false,
+                },
+                {
+                  roomId: '',
+                  seat: 3,
+                  userId: null,
+                  controller: 'bot' as const,
+                  connected: false,
+                },
+              ]
+              const game = withRatingContext(createGame(undefined, rules), seatValues)
               const [created] = await tx
                 .insert(room)
                 .values({
@@ -949,7 +1336,10 @@ const GameServiceLive = Layer.succeed(
                 .update(room)
                 .set({
                   status: 'playing',
-                  game: createGame(undefined, record.rules),
+                  game: withRatingContext(createGame(undefined, record.rules), [
+                    ...seats,
+                    { seat: 3, userId, controller: 'human', connected: true },
+                  ]),
                   version: record.version + 1,
                   updatedAt: new Date(),
                 })
@@ -1106,13 +1496,29 @@ const GameServiceLive = Layer.succeed(
             if (record.partyId && command.action.type === 'new-match') {
               throw new DomainError('invalid', 'Both partners must confirm a rematch.')
             }
+            if (
+              command.action.type === 'new-match' &&
+              seats.every((seat) => {
+                return seat.userId !== null
+              }) &&
+              seats.some((seat) => {
+                return !seat.connected || seat.controller !== 'human'
+              })
+            ) {
+              throw new DomainError('conflict', 'All players must reconnect before a rematch.')
+            }
             if (hostAction && record.hostUserId !== userId) {
               throw new DomainError('forbidden', 'Only the host can advance the match.')
             }
             if (!hostAction && record.game.activePlayer !== actor.seat) {
               throw new DomainError('forbidden', 'It is not your turn.')
             }
-            const reduced = reduceGame(record.game, command.action as GameAction)
+            if (command.action.type === 'new-match') {
+              await recordCompletedMatch(record, record.game, seats, tx)
+            }
+            const nextGame = reduceGame(record.game, command.action as GameAction)
+            const reduced =
+              command.action.type === 'new-match' ? withRatingContext(nextGame, seats) : nextGame
             if (reduced === record.game) {
               throw new DomainError('invalid', 'That action is not legal now.')
             }
@@ -1130,7 +1536,9 @@ const GameServiceLive = Layer.succeed(
               hasDisconnectedHuman,
               hostDisconnected,
             )
-            await recordCompletedMatch(record, reduced, seats, tx)
+            if (command.action.type !== 'new-match') {
+              await recordCompletedMatch(record, reduced, seats, tx)
+            }
             await tx.insert(roomCommand).values({
               roomId: command.roomId,
               commandId: command.commandId,
@@ -1288,10 +1696,10 @@ const GameServiceLive = Layer.succeed(
               .where(eq(roomSeat.roomId, roomId))
               .orderBy(roomSeat.seat)
             const actor = seats.find((seat) => {
-              return seat.userId === userId && seat.controller === 'human'
+              return seat.userId === userId && seat.controller === 'human' && seat.connected
             })
             const humans = seats.filter((seat) => {
-              return seat.userId !== null
+              return seat.userId !== null && seat.controller === 'human' && seat.connected
             })
             if (!actor) {
               throw new DomainError('forbidden', 'You are not seated at this table.')
@@ -1309,7 +1717,7 @@ const GameServiceLive = Layer.succeed(
               })
             ) {
               await recordCompletedMatch(record, record.game, seats, tx)
-              const game = reduceGame(record.game, { type: 'new-match' })
+              const game = withRatingContext(reduceGame(record.game, { type: 'new-match' }), seats)
               await tx.delete(rematchVote).where(eq(rematchVote.roomId, roomId))
               await tx
                 .update(room)
@@ -1388,10 +1796,15 @@ const GameServiceLive = Layer.succeed(
                 hasDisconnectedHuman,
                 hostDisconnected,
               )
-              if (presenceChanged || status !== record.status) {
+              const game = enrollRatingParticipant(record.game, {
+                ...seat,
+                connected,
+                controller: connected ? 'human' : seat.controller,
+              })
+              if (presenceChanged || status !== record.status || game !== record.game) {
                 await tx
                   .update(room)
-                  .set({ status, updatedAt: new Date() })
+                  .set({ status, game, updatedAt: new Date() })
                   .where(eq(room.id, roomId))
               }
               return viewRoom(userId, roomId, tx)

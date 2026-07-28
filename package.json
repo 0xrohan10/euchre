@@ -9,7 +9,7 @@
     "cf:build": "bash scripts/cf-build.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "deploy": "bun run build && wrangler deploy",
+    "deploy": "bun run cf:build && wrangler deploy",
     "cf-typegen": "wrangler types",
     "lint": "oxlint",
     "fmt": "oxfmt",

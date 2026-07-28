@@ -3,6 +3,7 @@ import type { Card } from './game/card'
 import type { Player } from './game/player'
 import { reduceGame } from './game/reduce'
 import type { GameRules } from './game/rules'
+import type { RatingMode } from './game/skill'
 import { emptyWonTricks, type GameAction, type GameState } from './game/state'
 
 export type RoomStatus = 'lobby' | 'playing' | 'paused' | 'finished'
@@ -13,9 +14,15 @@ export type SeatView = {
   name: string
   controller: 'human' | 'bot'
   connected: boolean
+  rating: number | null
+  ratingGames: number
+  ratingMode: RatingMode
 }
 
-export type GameView = Omit<GameState, 'hands' | 'kitty'> & {
+export type GameView = Omit<
+  GameState,
+  'hands' | 'kitty' | 'initialHands' | 'ratingParticipants'
+> & {
   hand: Card[]
   handCounts: [number, number, number, number]
 }
@@ -70,7 +77,13 @@ export type PlayerAction = Extract<
 >
 
 export function projectGame(game: GameState, viewerSeat: Player): GameView {
-  const { hands, kitty: _kitty, ...publicGame } = game
+  const {
+    hands,
+    kitty: _kitty,
+    initialHands: _initialHands,
+    ratingParticipants: _ratingParticipants,
+    ...publicGame
+  } = game
   return {
     ...publicGame,
     wonTricks: game.wonTricks ?? emptyWonTricks(),

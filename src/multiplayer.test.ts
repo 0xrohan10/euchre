@@ -26,6 +26,8 @@ it('projects only the authenticated player hand', () => {
   expect(view.handCounts).toEqual([5, 5, 5, 5])
   expect('hands' in view).toBe(false)
   expect('kitty' in view).toBe(false)
+  expect('initialHands' in view).toBe(false)
+  expect('ratingParticipants' in view).toBe(false)
 })
 
 it('rotates canonical seats around each viewer', () => {

@@ -417,5 +417,15 @@ describe('Euchre rules', () => {
     expect(result.score).toEqual([0, 2])
     expect(result.wonTricks[3]).toHaveLength(1)
     expect(result.wonTricks[3][0]).toHaveLength(4)
+    expect(result.handResults).toHaveLength(1)
+    expect(result.handResults?.[0]).toMatchObject({
+      maker: 0,
+      teamTricks: [2, 3],
+      playerTricks: [1, 1, 1, 2],
+      points: [0, 2],
+    })
+
+    const nextHand = reduceGame(result, { type: 'next-hand' })
+    expect(nextHand.handResults).toEqual(result.handResults)
   })
 })

@@ -2,6 +2,7 @@ import { SUITS, hasNaturalTrump, legalCards, trickWinner } from './card'
 import { createGame, deal, farmersHandRank } from './deal'
 import { next, nextActive, teamName, teamOf } from './player'
 import { emptyWonTricks, type GameAction, type GameState } from './state'
+import { summarizeCompletedHand } from './skill'
 
 function beginPlay(state: GameState): GameState {
   return {
@@ -26,6 +27,7 @@ function scoreHand(state: GameState): GameState {
   const score: [number, number] = [...state.score]
   score[scoringTeam] += points
   const matchOver = score[scoringTeam] >= 10
+  const handResult = summarizeCompletedHand(state, scoringTeam, points)
   const result =
     made < 3
       ? `${teamName(makerTeam)} was euchred.`
@@ -37,6 +39,7 @@ function scoreHand(state: GameState): GameState {
     score,
     phase: matchOver ? 'match-over' : 'hand-over',
     notice: `${result} ${teamName(scoringTeam)} scores ${points}.`,
+    handResults: [...(state.handResults ?? []), handResult],
   }
 }
 
@@ -48,7 +51,14 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
     return createGame(undefined, state.rules)
   }
   if (action.type === 'next-hand' && state.phase === 'hand-over') {
-    return deal(next(state.dealer), state.score, state.handNumber + 1, state.rules)
+    return deal(next(state.dealer), state.score, state.handNumber + 1, state.rules, undefined, {
+      handResults: state.handResults ?? [],
+      ratingEvidenceComplete: state.ratingEvidenceComplete ?? false,
+      ratingMode: state.ratingMode,
+      ratingParticipants: state.ratingParticipants,
+      ratingForfeitTeam: state.ratingForfeitTeam,
+      ratingBotSeats: state.ratingBotSeats,
+    })
   }
   if (action.type === 'collect-trick' && state.phase === 'trick-complete') {
     const winner = state.lastTrickWinner
@@ -102,6 +112,9 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
       phase: 'ordering',
       activePlayer: next(state.dealer),
       hands,
+      initialHands: hands.map((hand) => {
+        return [...hand]
+      }) as GameState['hands'],
       kitty: [state.upCard, ...exchanged],
       exchangedPlayer: state.activePlayer,
       notice: `Player ${state.activePlayer + 1} exchanges a farmer's hand.`,
@@ -111,7 +124,14 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
   if (action.type === 'pass' && (state.phase === 'ordering' || state.phase === 'calling')) {
     if (state.phase === 'calling' && state.activePlayer === state.dealer) {
       if (!state.rules.stickDealer) {
-        return deal(next(state.dealer), state.score, state.handNumber, state.rules)
+        return deal(next(state.dealer), state.score, state.handNumber, state.rules, undefined, {
+          handResults: state.handResults ?? [],
+          ratingEvidenceComplete: state.ratingEvidenceComplete ?? false,
+          ratingMode: state.ratingMode,
+          ratingParticipants: state.ratingParticipants,
+          ratingForfeitTeam: state.ratingForfeitTeam,
+          ratingBotSeats: state.ratingBotSeats,
+        })
       }
       const canCall = SUITS.some((suit) => {
         return (
@@ -119,7 +139,16 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
           (!state.rules.requireNaturalTrump || hasNaturalTrump(state.hands[state.dealer], suit))
         )
       })
-      return canCall ? state : deal(next(state.dealer), state.score, state.handNumber, state.rules)
+      return canCall
+        ? state
+        : deal(next(state.dealer), state.score, state.handNumber, state.rules, undefined, {
+            handResults: state.handResults ?? [],
+            ratingEvidenceComplete: state.ratingEvidenceComplete ?? false,
+            ratingMode: state.ratingMode,
+            ratingParticipants: state.ratingParticipants,
+            ratingForfeitTeam: state.ratingForfeitTeam,
+            ratingBotSeats: state.ratingBotSeats,
+          })
     }
     const nextPlayer = next(state.activePlayer)
     if (nextPlayer === next(state.dealer)) {

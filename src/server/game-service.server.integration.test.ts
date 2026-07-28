@@ -184,7 +184,16 @@ describeIntegration('GameService.tick lock and race behavior', () => {
       if (result.kind === 'resolved') {
         for (const seat of result.view.seats) {
           expect(Object.keys(seat).sort()).toEqual(
-            ['connected', 'controller', 'name', 'seat', 'userId'].sort(),
+            [
+              'connected',
+              'controller',
+              'name',
+              'rating',
+              'ratingGames',
+              'ratingMode',
+              'seat',
+              'userId',
+            ].sort(),
           )
         }
       }

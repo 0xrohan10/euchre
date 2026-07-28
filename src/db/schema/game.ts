@@ -16,6 +16,8 @@ import {
 import type { GameRules } from '../../game/rules'
 import type { GameHistorySeat } from '../../game/history'
 import type { GameAction, GameState } from '../../game/state'
+import type { Team } from '../../game/player'
+import type { RatingMode } from '../../game/skill'
 import { user } from './auth'
 
 export const roomStatus = pgEnum('room_status', ['lobby', 'playing', 'paused', 'finished'])
@@ -151,6 +153,68 @@ export const gameHistoryParticipant = pgTable(
     return [
       primaryKey({ columns: [table.gameHistoryId, table.userId] }),
       index('game_history_participant_user_id_idx').on(table.userId),
+    ]
+  },
+)
+
+export const ratedMatch = pgTable('rated_match', {
+  gameHistoryId: uuid('game_history_id')
+    .primaryKey()
+    .references(
+      () => {
+        return gameHistory.id
+      },
+      { onDelete: 'cascade' },
+    ),
+  ratedAt: timestamp('rated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const pendingRating = pgTable('pending_rating', {
+  gameHistoryId: uuid('game_history_id')
+    .primaryKey()
+    .references(
+      () => {
+        return gameHistory.id
+      },
+      { onDelete: 'cascade' },
+    ),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  mode: varchar('mode', { length: 16 }).$type<RatingMode>(),
+  participants: jsonb('participants').$type<GameState['ratingParticipants']>(),
+  forfeitTeam: integer('forfeit_team').$type<Team>(),
+})
+
+export const playerRating = pgTable(
+  'player_rating',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(
+        () => {
+          return user.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    mode: varchar('mode', { length: 16 }).$type<RatingMode>().notNull(),
+    rating: integer('rating').notNull().default(1000),
+    gamesPlayed: integer('games_played').notNull().default(0),
+    wins: integer('wins').notNull().default(0),
+    losses: integer('losses').notNull().default(0),
+    handsPlayed: integer('hands_played').notNull().default(0),
+    calls: integer('calls').notNull().default(0),
+    callsWon: integer('calls_won').notNull().default(0),
+    partnerCalls: integer('partner_calls').notNull().default(0),
+    partnerCallsWon: integer('partner_calls_won').notNull().default(0),
+    defenses: integer('defenses').notNull().default(0),
+    defensesWon: integer('defenses_won').notNull().default(0),
+    tricksWon: integer('tricks_won').notNull().default(0),
+    expectedTricksMilli: integer('expected_tricks_milli').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => {
+    return [
+      primaryKey({ columns: [table.userId, table.mode] }),
+      index('player_rating_mode_rating_idx').on(table.mode, table.rating),
     ]
   },
 )
