@@ -7,4 +7,13 @@
   "observability": {
     "enabled": true,
   },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "29d914fb9e6f4cd0acd5a2239dd9d247",
+    },
+  ],
+  "placement": {
+    "region": "aws:us-east-1",
+  },
 }

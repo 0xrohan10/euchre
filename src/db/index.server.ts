@@ -1,9 +1,13 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 
+const connectionString =
+  process.env.NODE_ENV === 'production'
+    ? (await import('cloudflare:workers')).env.HYPERDRIVE.connectionString
+    : (process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:55437/kitty')
+
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:55437/kitty',
+  connectionString,
   // A workerd TCP socket belongs to the request that opened it. Reusing an idle pg
   // client in another request causes workerd to cancel that request as hung.
   max: 5,
