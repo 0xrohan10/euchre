@@ -8,7 +8,7 @@ export const Route = createRootRoute({
       meta: [
         { charSet: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { name: 'theme-color', content: '#0d1b21' },
+        { name: 'theme-color', content: '#16091a' },
         {
           name: 'description',
           content: 'Private four-player Euchre tables. Deal a hand with friends in seconds.',

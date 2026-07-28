@@ -4,67 +4,67 @@
 @import 'tailwindcss/theme' layer(theme);
 @import 'tailwindcss/utilities' layer(utilities);
 
-/* Brand palette → CSS vars + Tailwind color utilities */
+/* Brand palette -> CSS vars + Tailwind color utilities */
 @theme {
-  --color-ink-black-50: hsl(197.5 92.3% 94.9%);
-  --color-ink-black-100: hsl(196.6 92.2% 90%);
-  --color-ink-black-200: hsl(196.9 94.1% 80%);
-  --color-ink-black-300: hsl(196.8 93.5% 70%);
-  --color-ink-black-400: hsl(196.9 94.1% 60%);
-  --color-ink-black-500: hsl(197.1 93.7% 50%);
-  --color-ink-black-600: hsl(196.9 94.1% 40%);
-  --color-ink-black-700: hsl(196.8 93.5% 30%);
-  --color-ink-black-800: hsl(196.9 94.1% 20%);
-  --color-ink-black-900: hsl(196.6 92.2% 10%);
-  --color-ink-black-950: hsl(197.6 94.4% 7.1%);
+  --color-ocean-blue-50: hsl(201.2 68% 95.1%);
+  --color-ocean-blue-100: hsl(200.6 68.6% 90%);
+  --color-ocean-blue-200: hsl(201.2 66.7% 80%);
+  --color-ocean-blue-300: hsl(201 67.3% 70%);
+  --color-ocean-blue-400: hsl(200.7 66.7% 60%);
+  --color-ocean-blue-500: hsl(201.1 67.1% 50%);
+  --color-ocean-blue-600: hsl(200.7 66.7% 40%);
+  --color-ocean-blue-700: hsl(201 67.3% 30%);
+  --color-ocean-blue-800: hsl(201.2 66.7% 20%);
+  --color-ocean-blue-900: hsl(200.6 68.6% 10%);
+  --color-ocean-blue-950: hsl(202.5 66.7% 7.1%);
 
-  --color-dark-teal-50: hsl(197.6 68% 95.1%);
-  --color-dark-teal-100: hsl(196.4 64.7% 90%);
-  --color-dark-teal-200: hsl(196.8 66.7% 80%);
-  --color-dark-teal-300: hsl(197.2 66% 70%);
-  --color-dark-teal-400: hsl(197 65.7% 60%);
-  --color-dark-teal-500: hsl(197 66.3% 50%);
-  --color-dark-teal-600: hsl(197 65.7% 40%);
-  --color-dark-teal-700: hsl(197.2 66% 30%);
-  --color-dark-teal-800: hsl(196.8 66.7% 20%);
-  --color-dark-teal-900: hsl(196.4 64.7% 10%);
-  --color-dark-teal-950: hsl(197.5 66.7% 7.1%);
+  --color-lilac-50: hsl(310 23.1% 94.9%);
+  --color-lilac-100: hsl(313.8 25.5% 90%);
+  --color-lilac-200: hsl(315 23.5% 80%);
+  --color-lilac-300: hsl(314.6 24.2% 70%);
+  --color-lilac-400: hsl(315 23.5% 60%);
+  --color-lilac-500: hsl(314.8 23.9% 50%);
+  --color-lilac-600: hsl(315 23.5% 40%);
+  --color-lilac-700: hsl(314.6 24.2% 30%);
+  --color-lilac-800: hsl(315 23.5% 20%);
+  --color-lilac-900: hsl(313.8 25.5% 10%);
+  --color-lilac-950: hsl(315 22.2% 7.1%);
 
-  --color-air-force-blue-50: hsl(190 23.1% 94.9%);
-  --color-air-force-blue-100: hsl(198.5 25.5% 90%);
-  --color-air-force-blue-200: hsl(195 23.5% 80%);
-  --color-air-force-blue-300: hsl(196.2 24.2% 70%);
-  --color-air-force-blue-400: hsl(196.2 23.5% 60%);
-  --color-air-force-blue-500: hsl(195.7 23.9% 50%);
-  --color-air-force-blue-600: hsl(196.3 23.5% 40%);
-  --color-air-force-blue-700: hsl(196.2 24.2% 30%);
-  --color-air-force-blue-800: hsl(195 23.5% 20%);
-  --color-air-force-blue-900: hsl(198.5 25.5% 10%);
-  --color-air-force-blue-950: hsl(195 22.2% 7.1%);
+  --color-midnight-violet-50: hsl(285 46.2% 94.9%);
+  --color-midnight-violet-100: hsl(284.3 45.1% 90%);
+  --color-midnight-violet-200: hsl(282.5 47.1% 80%);
+  --color-midnight-violet-300: hsl(283.1 46.4% 70%);
+  --color-midnight-violet-400: hsl(283.1 47.1% 60%);
+  --color-midnight-violet-500: hsl(282.9 46.7% 50%);
+  --color-midnight-violet-600: hsl(283.1 47.1% 40%);
+  --color-midnight-violet-700: hsl(283.1 46.4% 30%);
+  --color-midnight-violet-800: hsl(282.5 47.1% 20%);
+  --color-midnight-violet-900: hsl(284.3 45.1% 10%);
+  --color-midnight-violet-950: hsl(282.4 48.6% 6.9%);
 
-  --color-ash-grey-50: hsl(135 15.4% 94.9%);
-  --color-ash-grey-100: hsl(120 13.7% 90%);
-  --color-ash-grey-200: hsl(127.5 15.7% 80%);
-  --color-ash-grey-300: hsl(125.2 15% 70%);
-  --color-ash-grey-400: hsl(126 14.7% 60%);
-  --color-ash-grey-500: hsl(126.2 15.3% 50%);
-  --color-ash-grey-600: hsl(126 14.7% 40%);
-  --color-ash-grey-700: hsl(125.2 15% 30%);
-  --color-ash-grey-800: hsl(127.5 15.7% 20%);
-  --color-ash-grey-900: hsl(120 13.7% 10%);
-  --color-ash-grey-950: hsl(130 16.7% 7.1%);
+  --color-strawberry-red-50: hsl(346.2 100% 94.9%);
+  --color-strawberry-red-100: hsl(348.2 100% 90%);
+  --color-strawberry-red-200: hsl(348.2 100% 80%);
+  --color-strawberry-red-300: hsl(347.8 100% 70%);
+  --color-strawberry-red-400: hsl(347.9 100% 60%);
+  --color-strawberry-red-500: hsl(348 100% 50%);
+  --color-strawberry-red-600: hsl(347.9 100% 40%);
+  --color-strawberry-red-700: hsl(347.8 100% 30%);
+  --color-strawberry-red-800: hsl(348.2 100% 20%);
+  --color-strawberry-red-900: hsl(348.2 100% 10%);
+  --color-strawberry-red-950: hsl(348.3 100% 7.1%);
 
-  --color-beige-50: hsl(77.1 53.8% 94.9%);
-  --color-beige-100: hsl(78.6 56.9% 90%);
-  --color-beige-200: hsl(79.3 54.9% 80%);
-  --color-beige-300: hsl(79.1 55.6% 70%);
-  --color-beige-400: hsl(78.8 54.9% 60%);
-  --color-beige-500: hsl(79.1 55.3% 50%);
-  --color-beige-600: hsl(78.8 54.9% 40%);
-  --color-beige-700: hsl(79.1 55.6% 30%);
-  --color-beige-800: hsl(79.3 54.9% 20%);
-  --color-beige-900: hsl(78.6 56.9% 10%);
-  --color-beige-950: hsl(81 55.6% 7.1%);
+  --color-tea-green-50: hsl(120 28% 95.1%);
+  --color-tea-green-100: hsl(116 29.4% 90%);
+  --color-tea-green-200: hsl(114 29.4% 80%);
+  --color-tea-green-300: hsl(114.7 29.4% 70%);
+  --color-tea-green-400: hsl(115 29.4% 60%);
+  --color-tea-green-500: hsl(115.1 28.6% 50%);
+  --color-tea-green-600: hsl(115 29.4% 40%);
+  --color-tea-green-700: hsl(114.7 29.4% 30%);
+  --color-tea-green-800: hsl(114 29.4% 20%);
+  --color-tea-green-900: hsl(116 29.4% 10%);
+  --color-tea-green-950: hsl(114 27.8% 7.1%);
 
   --font-sans: Inter, system-ui, sans-serif;
 }
@@ -97,32 +97,32 @@
 
 /* Semantic tokens */
 :root {
-  --canvas: var(--color-dark-teal-950);
-  --canvas-lift: hsl(197 58% 13%);
-  --chrome: hsl(197 45% 9%);
-  --panel: hsl(197 38% 10.5%);
-  --panel-raised: hsl(197 30% 13.5%);
-  --well: hsl(197 48% 5.5%);
-  --line: hsl(196 60% 78% / 0.12);
-  --line-strong: hsl(196 60% 78% / 0.2);
+  --canvas: var(--color-midnight-violet-950);
+  --canvas-lift: var(--color-midnight-violet-900);
+  --chrome: var(--color-lilac-950);
+  --panel: color-mix(in srgb, var(--color-midnight-violet-900) 82%, var(--color-lilac-900));
+  --panel-raised: var(--color-midnight-violet-800);
+  --well: color-mix(in srgb, var(--color-midnight-violet-950) 82%, var(--color-ocean-blue-950));
+  --line: hsl(315 23.5% 80% / 0.14);
+  --line-strong: hsl(315 23.5% 80% / 0.24);
 
-  --text: var(--color-air-force-blue-50);
-  --text-muted: var(--color-air-force-blue-300);
-  --text-faint: var(--color-air-force-blue-400);
+  --text: var(--color-ocean-blue-50);
+  --text-muted: var(--color-lilac-300);
+  --text-faint: var(--color-lilac-400);
 
-  --accent: var(--color-ink-black-400);
-  --accent-hover: var(--color-ink-black-300);
-  --accent-ink: var(--color-ink-black-950);
-  --accent-glow: hsl(196.9 94.1% 60% / 0.18);
+  --accent: var(--color-ocean-blue-400);
+  --accent-hover: var(--color-ocean-blue-300);
+  --accent-ink: var(--color-ocean-blue-950);
+  --accent-glow: hsl(200.7 66.7% 60% / 0.22);
 
-  --felt: var(--color-dark-teal-800);
-  --felt-deep: var(--color-dark-teal-950);
-  --card-face: hsl(196 26% 97%);
-  --card-ink: var(--color-ink-black-950);
-  --card-red: hsl(356 72% 46%);
-  --suit-red: hsl(356 84% 70%);
-  --danger: hsl(356 84% 74%);
-  --shadow-color: 197 70% 3%;
+  --felt: var(--color-tea-green-800);
+  --felt-deep: var(--color-tea-green-950);
+  --card-face: var(--color-lilac-50);
+  --card-ink: var(--color-midnight-violet-950);
+  --card-red: var(--color-strawberry-red-700);
+  --suit-red: var(--color-strawberry-red-300);
+  --danger: var(--color-strawberry-red-300);
+  --shadow-color: 282.4 48.6% 3%;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }

@@ -266,7 +266,7 @@
   height: 26px;
 }
 .brand-mark-back {
-  fill: var(--color-ink-black-600);
+  fill: var(--color-ocean-blue-600);
 }
 .brand-mark-front {
   fill: var(--accent);
@@ -348,7 +348,7 @@
   position: fixed;
   z-index: 30;
   inset: 0;
-  background: hsl(197 62% 3% / 0.56);
+  background: hsl(282.4 48.6% 6.9% / 0.72);
   backdrop-filter: blur(6px);
 }
 .header-actions-tray.is-open {
@@ -487,9 +487,9 @@
   flex: none;
   width: 7px;
   height: 7px;
-  border: 1px solid hsl(196 20% 86% / 0.45);
+  border: 1px solid hsl(315 23.5% 80% / 0.45);
   border-radius: 50%;
-  background: hsl(196 15% 8%);
+  background: var(--color-midnight-violet-950);
 }
 .team-red .team-name i {
   border-color: hsl(355 72% 76% / 0.45);
@@ -634,17 +634,17 @@
   aspect-ratio: 1.4;
   overflow: hidden;
   border-radius: 48px;
-  background: radial-gradient(ellipse at 50% 40%, hsl(196.8 66.7% 25%), var(--felt) 68%);
+  background: radial-gradient(ellipse at 50% 40%, var(--color-tea-green-700), var(--felt) 68%);
   box-shadow:
     inset 0 0 0 9px var(--felt-deep),
-    inset 0 0 0 10px hsl(196 94% 72% / 0.1),
+    inset 0 0 0 10px hsl(114 29.4% 80% / 0.1),
     0 20px 48px hsl(var(--shadow-color) / 0.45);
 }
 .felt-table::after {
   content: '';
   position: absolute;
   inset: 18px;
-  border: 1px solid hsl(196 94% 75% / 0.12);
+  border: 1px solid hsl(114 29.4% 80% / 0.14);
   border-radius: 32px;
   pointer-events: none;
 }
@@ -724,7 +724,7 @@
   border-radius: 2px;
   box-shadow:
     0 1px 2px hsl(var(--shadow-color) / 0.35),
-    0 0 0 1px hsl(196 80% 80% / 0.12);
+    0 0 0 1px hsl(114 29.4% 80% / 0.12);
   object-fit: cover;
   pointer-events: none;
   transform: translate(calc(var(--stack-index, 0) * 1px), calc(var(--stack-index, 0) * -1px));
@@ -737,8 +737,8 @@
   gap: 9px;
   padding: 7px 9px;
   border-radius: 9px;
-  background: hsl(197 62% 5% / 0.72);
-  box-shadow: inset 0 0 0 1px hsl(196 80% 80% / 0.08);
+  background: hsl(282.4 48.6% 6.9% / 0.78);
+  box-shadow: inset 0 0 0 1px hsl(315 23.5% 80% / 0.1);
   backdrop-filter: blur(8px);
 }
 .player-badge.active {
@@ -753,22 +753,23 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--color-air-force-blue-500);
-  color: var(--color-air-force-blue-50);
+  background: var(--color-lilac-500);
+  color: var(--color-midnight-violet-950);
   font-size: 11px;
   font-weight: 700;
-  box-shadow: 0 0 0 1px hsl(196 60% 90% / 0.18);
+  box-shadow: 0 0 0 1px hsl(315 23.5% 80% / 0.22);
 }
 .avatar-0 {
   background: var(--accent);
   color: var(--accent-ink);
 }
 .avatar-2 {
-  background: var(--color-dark-teal-500);
-  color: var(--color-dark-teal-950);
+  background: var(--color-tea-green-500);
+  color: var(--color-tea-green-950);
 }
 .avatar-3 {
-  background: var(--color-ash-grey-600);
+  background: var(--color-ocean-blue-500);
+  color: var(--color-ocean-blue-950);
 }
 .player-copy {
   min-width: 0;
@@ -781,7 +782,7 @@
   font-weight: 650;
 }
 .player-copy span {
-  color: var(--color-air-force-blue-300);
+  color: var(--color-lilac-300);
   font-size: 9px;
   white-space: nowrap;
 }
@@ -812,7 +813,7 @@
   border: 2px solid var(--felt-deep);
   border-radius: 50%;
   background: var(--card-face);
-  color: var(--color-dark-teal-900);
+  color: var(--color-midnight-violet-950);
   font-size: 11px;
   font-weight: 750;
 }
@@ -860,8 +861,8 @@
   transform: translateX(-50%);
   padding: 5px 9px;
   border-radius: 5px;
-  background: hsl(197 62% 4% / 0.55);
-  color: var(--color-air-force-blue-200);
+  background: hsl(282.4 48.6% 6.9% / 0.62);
+  color: var(--color-lilac-200);
   font-size: 9px;
   font-weight: 650;
   letter-spacing: 0.05em;
@@ -869,7 +870,7 @@
 }
 .trump-chip span {
   font-size: 14px;
-  color: var(--color-air-force-blue-50);
+  color: var(--color-ocean-blue-50);
 }
 .trump-chip.red span {
   color: var(--suit-red);
@@ -1059,9 +1060,9 @@ button.playing-card.playable:active {
   gap: 10px;
   padding: 6px;
   border-radius: 12px;
-  background: hsl(197 62% 5% / 0.84);
+  background: hsl(282.4 48.6% 6.9% / 0.88);
   box-shadow:
-    inset 0 0 0 1px hsl(196 80% 80% / 0.12),
+    inset 0 0 0 1px hsl(315 23.5% 80% / 0.14),
     0 10px 28px hsl(var(--shadow-color) / 0.22);
   backdrop-filter: blur(10px);
 }
@@ -1085,21 +1086,21 @@ button.playing-card.playable:active {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--color-air-force-blue-600);
-  box-shadow: 0 0 0 3px hsl(196 60% 78% / 0.08);
+  background: var(--color-ocean-blue-500);
+  box-shadow: 0 0 0 3px hsl(315 23.5% 80% / 0.1);
 }
 .status-light.your-turn {
   background: var(--accent);
-  box-shadow: 0 0 0 3px hsl(196.9 94% 60% / 0.22);
+  box-shadow: 0 0 0 3px hsl(200.7 66.7% 60% / 0.24);
   animation: status-pulse 1.6s ease-in-out infinite;
 }
 @keyframes status-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 3px hsl(196.9 94% 60% / 0.22);
+    box-shadow: 0 0 0 3px hsl(200.7 66.7% 60% / 0.24);
   }
   50% {
-    box-shadow: 0 0 0 5px hsl(196.9 94% 60% / 0.08);
+    box-shadow: 0 0 0 5px hsl(200.7 66.7% 60% / 0.1);
   }
 }
 .bid-controls {
@@ -1152,7 +1153,7 @@ button.playing-card.playable:active {
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .suit-buttons button:hover {
-  background: hsl(197 30% 18%);
+  background: var(--color-ocean-blue-700);
 }
 .suit-buttons button.red {
   color: var(--suit-red);
@@ -1172,7 +1173,7 @@ button.playing-card.playable:active {
     inset 0 0 0 1px var(--line-strong);
 }
 .rules-dialog::backdrop {
-  background: hsl(197 62% 3% / 0.78);
+  background: hsl(282.4 48.6% 6.9% / 0.82);
   backdrop-filter: blur(8px);
 }
 .rules-panel {
@@ -1432,7 +1433,7 @@ button.playing-card.playable:active {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: hsl(197 62% 3% / 0.72);
+  background: hsl(282.4 48.6% 6.9% / 0.78);
   backdrop-filter: blur(8px);
 }
 .settings-panel {
@@ -1475,7 +1476,7 @@ button.playing-card.playable:active {
   place-items: center;
   padding: 24px;
   border-radius: inherit;
-  background: hsl(197 62% 3% / 0.32);
+  background: hsl(282.4 48.6% 6.9% / 0.4);
   backdrop-filter: blur(1px);
 }
 .result-dialog {
