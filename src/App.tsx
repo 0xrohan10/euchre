@@ -109,20 +109,27 @@ export default function App() {
     if (!roomId) {
       return
     }
-    const events = new EventSource(`/api/tables/${roomId}/events`)
-    events.addEventListener('room', (event) => {
-      const next = JSON.parse((event as MessageEvent<string>).data) as RoomView
-      setRoom((current) => {
-        return acceptRoomUpdate(current, next)
+    let events: EventSource | undefined
+    const timer = window.setTimeout(() => {
+      const storageKey = 'euchre:event-stream-id'
+      const streamId = window.sessionStorage.getItem(storageKey) ?? crypto.randomUUID()
+      window.sessionStorage.setItem(storageKey, streamId)
+      events = new EventSource(`/api/tables/${roomId}/events?stream=${streamId}`)
+      events.addEventListener('room', (event) => {
+        const next = JSON.parse((event as MessageEvent<string>).data) as RoomView
+        setRoom((current) => {
+          return acceptRoomUpdate(current, next)
+        })
       })
-    })
-    events.addEventListener('gone', () => {
-      setRoom(null)
-      void getCurrentPartyFn().then(setParty)
-      void navigate({ to: '/', replace: true })
-    })
+      events.addEventListener('gone', () => {
+        setRoom(null)
+        void getCurrentPartyFn().then(setParty)
+        void navigate({ to: '/', replace: true })
+      })
+    }, 100)
     return () => {
-      return events.close()
+      window.clearTimeout(timer)
+      events?.close()
     }
   }, [navigate, roomId])
 

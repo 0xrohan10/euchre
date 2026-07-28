@@ -86,9 +86,12 @@ class DomainError extends Error {
 }
 
 function failure(cause: unknown): GameServiceError {
-  return cause instanceof DomainError
-    ? new GameServiceError({ code: cause.code, message: cause.message })
-    : new GameServiceError({ code: 'database', message: 'The game service is unavailable.' })
+  if (cause instanceof DomainError) {
+    return new GameServiceError({ code: cause.code, message: cause.message })
+  }
+
+  console.error('Game service database operation failed', cause)
+  return new GameServiceError({ code: 'database', message: 'The game service is unavailable.' })
 }
 
 function randomCode(): string {
@@ -246,7 +249,7 @@ const GameServiceLive = Layer.succeed(
     tick: Effect.fn('GameService.tick')((userId: string, roomId: string) => {
       return Effect.tryPromise({
         try: async () => {
-          await db.transaction(async (tx) => {
+          return db.transaction(async (tx) => {
             const [record] = await tx
               .select()
               .from(room)
@@ -325,38 +328,36 @@ const GameServiceLive = Layer.succeed(
               hasDisconnectedHuman,
               hostDisconnected,
             )
-            let version = record.version
+            // Presence/status-only changes must not bump `version` — that field is the CAS
+            // token for game commands. Bumping it on reconnect makes every in-flight play fail.
+            // Clients still accept same-version presence updates.
             if (callerReconnected || staleSeats.length > 0 || status !== record.status) {
-              version += 1
-              await tx
-                .update(room)
-                .set({ status, version, updatedAt: now })
-                .where(eq(room.id, roomId))
+              await tx.update(room).set({ status, updatedAt: now }).where(eq(room.id, roomId))
             }
-            if (staleSeats.length > 0) {
-              return
+            if (staleSeats.length === 0 && record.game && status === 'playing') {
+              const elapsed = now.getTime() - record.updatedAt.getTime()
+              const game =
+                record.game.phase === 'trick-complete'
+                  ? elapsed >= 1_600
+                    ? reduceGame(record.game, { type: 'collect-trick' })
+                    : record.game
+                  : elapsed >= 900
+                    ? advanceBot(record.game, currentSeats)
+                    : record.game
+              if (game !== record.game) {
+                await tx
+                  .update(room)
+                  .set({
+                    game,
+                    status: statusForGame(game),
+                    version: record.version + 1,
+                    updatedAt: now,
+                  })
+                  .where(eq(room.id, roomId))
+              }
             }
-            if (!record.game || status !== 'playing') {
-              return
-            }
-            const elapsed = now.getTime() - record.updatedAt.getTime()
-            const game =
-              record.game.phase === 'trick-complete'
-                ? elapsed >= 1_600
-                  ? reduceGame(record.game, { type: 'collect-trick' })
-                  : record.game
-                : elapsed >= 900
-                  ? advanceBot(record.game, currentSeats)
-                  : record.game
-            if (game === record.game) {
-              return
-            }
-            await tx
-              .update(room)
-              .set({ game, status: statusForGame(game), version: version + 1, updatedAt: now })
-              .where(eq(room.id, roomId))
+            return viewRoom(userId, roomId, tx)
           })
-          return viewRoom(userId, roomId)
         },
         catch: failure,
       })
@@ -1091,7 +1092,7 @@ const GameServiceLive = Layer.succeed(
       (userId: string, roomId: string, connected: boolean) => {
         return Effect.tryPromise({
           try: async () => {
-            await db.transaction(async (tx) => {
+            return db.transaction(async (tx) => {
               const [record] = await tx
                 .select()
                 .from(room)
@@ -1145,11 +1146,11 @@ const GameServiceLive = Layer.succeed(
               if (presenceChanged || status !== record.status) {
                 await tx
                   .update(room)
-                  .set({ status, version: record.version + 1, updatedAt: new Date() })
+                  .set({ status, updatedAt: new Date() })
                   .where(eq(room.id, roomId))
               }
+              return viewRoom(userId, roomId, tx)
             })
-            return viewRoom(userId, roomId)
           },
           catch: failure,
         })

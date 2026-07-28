@@ -3,119 +3,131 @@ import { Effect } from 'effect'
 import { auth } from '../../../../lib/auth.server'
 import { GameService, GameServiceError, gameRuntime } from '../../../../server/game-service.server'
 
+const activeStreams = new Map<string, symbol>()
+
 export const Route = createFileRoute('/api/tables/$roomId/events')({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
+        // Auth before the stream so we can 401 without hanging a Worker body.
         const session = await auth.api.getSession({ headers: request.headers })
         if (!session) {
           return new Response('Unauthorized', { status: 401 })
         }
 
-        const presence = gameRuntime.runPromise(
-          Effect.flatMap(GameService, (games) => {
-            return games.setPresence(session.user.id, params.roomId, true)
-          }),
-        )
-        try {
-          await presence
-        } catch {
-          return new Response('event: gone\ndata: {}\n\n', {
-            headers: {
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache, no-transform',
-            },
-          })
-        }
-
+        const roomId = params.roomId
+        const userId = session.user.id
+        const streamId = new URL(request.url).searchParams.get('stream') ?? crypto.randomUUID()
+        const streamKey = `${userId}:${roomId}:${streamId}`
+        const streamToken = Symbol()
         const encoder = new TextEncoder()
-        let timer: ReturnType<typeof setInterval> | undefined
-        let closed = false
-        let signature = ''
-        let heartbeat = 0
-        const close = () => {
-          if (closed) {
-            return
-          }
-          closed = true
-          if (timer) {
-            clearInterval(timer)
-          }
-        }
+        let onCancel = () => {}
+
         const stream = new ReadableStream<Uint8Array>({
-          async start(controller) {
-            const publish = async () => {
+          start(controller) {
+            let closed = false
+            let publishing = false
+            let timer: ReturnType<typeof setTimeout> | undefined
+            activeStreams.set(streamKey, streamToken)
+
+            const cleanup = () => {
               if (closed) {
                 return
               }
+              closed = true
+              if (timer !== undefined) {
+                clearTimeout(timer)
+                timer = undefined
+              }
+              if (activeStreams.get(streamKey) === streamToken) {
+                activeStreams.delete(streamKey)
+              }
               try {
-                const currentSession = await auth.api.getSession({ headers: request.headers })
-                if (!currentSession || currentSession.user.id !== session.user.id) {
-                  close()
-                  controller.close()
-                  return
-                }
-                const view = await gameRuntime.runPromise(
-                  Effect.flatMap(GameService, (games) => {
-                    return games.tick(session.user.id, params.roomId)
-                  }),
-                )
-                const nextSignature = `${view.version}:${view.status}:${view.seats
-                  .map((seat) => {
-                    return `${seat.connected}-${seat.controller}`
-                  })
-                  .join(',')}:${view.disconnectVote?.approvals.join(',')}`
-                if (signature !== nextSignature) {
-                  signature = nextSignature
-                  controller.enqueue(
-                    encoder.encode(`event: room\ndata: ${JSON.stringify(view)}\n\n`),
-                  )
-                }
-                heartbeat += 1
-                if (heartbeat % 15 === 0) {
-                  controller.enqueue(encoder.encode(': heartbeat\n\n'))
-                }
-              } catch (error) {
-                if (
-                  error instanceof GameServiceError &&
-                  (error.code === 'not-found' || error.code === 'forbidden')
-                ) {
-                  controller.enqueue(encoder.encode('event: gone\ndata: {}\n\n'))
-                  close()
-                  controller.close()
-                  return
-                }
-                try {
-                  if (!closed) {
-                    controller.enqueue(encoder.encode('event: error\ndata: {}\n\n'))
-                  }
-                } catch {
-                  close()
-                }
+                controller.close()
+              } catch {
+                // already closed
               }
             }
-            request.signal.addEventListener(
-              'abort',
-              () => {
-                close()
-              },
-              { once: true },
-            )
-            await publish()
-            if (!closed) {
-              timer = setInterval(() => {
-                return void publish()
+            onCancel = cleanup
+
+            const send = (event: string, data?: unknown) => {
+              if (closed) {
+                return
+              }
+              const payload =
+                data === undefined
+                  ? `event: ${event}\ndata: \n\n`
+                  : `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+              try {
+                controller.enqueue(encoder.encode(payload))
+              } catch {
+                cleanup()
+              }
+            }
+
+            const publish = async () => {
+              if (closed || publishing) {
+                return
+              }
+              if (activeStreams.get(streamKey) !== streamToken) {
+                cleanup()
+                return
+              }
+              publishing = true
+              try {
+                const view = await gameRuntime.runPromise(
+                  Effect.gen(function* () {
+                    const games = yield* GameService
+                    return yield* games.tick(userId, roomId)
+                  }),
+                )
+                send('room', view)
+              } catch (error) {
+                if (error instanceof GameServiceError && error.code === 'not-found') {
+                  send('gone')
+                  cleanup()
+                  return
+                }
+                // Transient errors: keep the stream; the next tick may recover.
+              } finally {
+                publishing = false
+              }
+            }
+
+            const schedule = () => {
+              if (closed) {
+                return
+              }
+              timer = setTimeout(() => {
+                void publish().finally(schedule)
               }, 500)
             }
+
+            request.signal.addEventListener('abort', cleanup, { once: true })
+
+            // Enqueue immediately so workerd sees a live response before any DB I/O.
+            try {
+              controller.enqueue(encoder.encode(': connected\n\n'))
+            } catch {
+              cleanup()
+              return
+            }
+
+            // Never block stream start on DB — that trips Workers hang detection in dev.
+            // `tick` renews presence itself. Failed ticks are retried instead of tearing down
+            // the EventSource, and stale-heartbeat detection handles abandoned connections.
+            schedule()
           },
-          cancel: close,
+          cancel() {
+            onCancel()
+          },
         })
+
         return new Response(stream, {
           headers: {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-transform',
             Connection: 'keep-alive',
-            'X-Accel-Buffering': 'no',
           },
         })
       },

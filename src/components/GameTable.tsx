@@ -65,6 +65,8 @@ export function GameTable({
         )
       : new Set<string>()
   const previousGame = useRef(game)
+  const roomRef = useRef(room)
+  roomRef.current = room
   const exchangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [farmerExchange, setFarmerExchange] = useState<{
     cards: Card[]
@@ -137,22 +139,42 @@ export function GameTable({
   async function act(action: GameAction) {
     setPending(true)
     setError('')
-    onRoom(optimisticRoomAction(room, action))
+    const base = roomRef.current
+    onRoom(optimisticRoomAction(base, action))
     try {
-      const next = await submitCommandFn({
-        data: {
-          roomId: room.id,
-          commandId: crypto.randomUUID(),
-          expectedVersion: room.version,
-          action,
-        },
-      })
+      const submit = (version: number) => {
+        return submitCommandFn({
+          data: {
+            roomId: base.id,
+            commandId: crypto.randomUUID(),
+            expectedVersion: version,
+            action,
+          },
+        })
+      }
+      let next: RoomView
+      try {
+        next = await submit(base.version)
+      } catch (first) {
+        const message = first instanceof Error ? first.message : String(first)
+        if (!/stale|version/i.test(message)) {
+          throw first
+        }
+        const fresh = await getRoomFn({ data: { roomId: base.id } })
+        onRoom(fresh)
+        next = await submit(fresh.version)
+      }
       onRoom(next)
       setAlone(false)
-    } catch {
-      setError('The table changed before that action. Your view was refreshed.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'That action failed.'
+      setError(
+        /stale|version/i.test(message)
+          ? 'The table changed before that action. Your view was refreshed.'
+          : message,
+      )
       try {
-        onRoom(await getRoomFn({ data: { roomId: room.id } }))
+        onRoom(await getRoomFn({ data: { roomId: roomRef.current.id } }))
       } catch {
         /* The SSE connection remains the fallback. */
       }
