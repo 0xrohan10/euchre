@@ -1,5 +1,5 @@
-import type { SoundRole } from "./sound-roles";
-import type { SoundSource } from "./engine";
+import type { SoundRole } from './sound-roles'
+import type { SoundSource } from './engine'
 import {
   softPack,
   aeroPack,
@@ -11,17 +11,17 @@ import {
   retroPack,
   crispPack,
   type SoundPackName,
-} from "../sounds/packs";
+} from '../sounds/packs'
 
 // Re-export so consumers can import SoundPackName from this module
-export type { SoundPackName };
+export type { SoundPackName }
 
 /**
  * A complete mapping of every SoundRole to a SoundSource for one pack.
  * SoundSource is either a SoundSynthesizer function (preferred) or a
  * base64 data URI / public-path string (for custom user overrides).
  */
-export type SoundPack = Record<SoundRole, SoundSource>;
+export type SoundPack = Record<SoundRole, SoundSource>
 
 // ---------------------------------------------------------------------------
 // Pack registry - maps pack name → full SoundPack
@@ -43,15 +43,15 @@ export const packRegistry: Record<SoundPackName, SoundPack> = {
   minimal: minimalPack,
   retro: retroPack,
   crisp: crispPack,
-};
+}
 
 /**
  * Default sound pack name.
  * "aero" is the default - balanced, pleasant, professional.
  */
-export const DEFAULT_PACK: SoundPackName = "aero";
+export const DEFAULT_PACK: SoundPackName = 'aero'
 
 /**
  * Backwards-compat alias: the default pack's role → source mapping.
  */
-export const roleRegistry: SoundPack = aeroPack;
+export const roleRegistry: SoundPack = aeroPack

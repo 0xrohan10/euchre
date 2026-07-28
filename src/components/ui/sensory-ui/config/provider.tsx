@@ -1,19 +1,15 @@
-"use client";
+'use client'
 // oxlint-disable react/only-export-components -- The upstream module intentionally co-locates its provider and hook.
 
-import * as React from "react";
+import * as React from 'react'
 import {
   closeAudioContext,
   playSound as enginePlaySound,
   type PlaySoundOptions,
   type SoundPlayback,
-} from "./engine";
-import {
-  mergeConfig,
-  resolveRole,
-  type SensoryUIConfig,
-} from "./config";
-import type { SoundRole } from "./sound-roles";
+} from './engine'
+import { mergeConfig, resolveRole, type SensoryUIConfig } from './config'
+import type { SoundRole } from './sound-roles'
 
 // ---------------------------------------------------------------------------
 // Context shape
@@ -24,18 +20,15 @@ export interface SensoryUIContextValue {
    * Play a sound by its semantic role.
    * Returns a SoundPlayback handle or null if suppressed.
    */
-  playSound: (
-    role: SoundRole,
-    options?: PlaySoundOptions
-  ) => Promise<SoundPlayback | null>;
+  playSound: (role: SoundRole, options?: PlaySoundOptions) => Promise<SoundPlayback | null>
   /** Whether the sound system is globally active. */
-  enabled: boolean;
+  enabled: boolean
   /** Current master volume (0–1). */
-  volume: number;
+  volume: number
   /** Whether the user has manually muted all sounds. */
-  muted: boolean;
+  muted: boolean
   /** Toggle the mute state programmatically. */
-  setMuted: (muted: boolean) => void;
+  setMuted: (muted: boolean) => void
   /**
    * Whether the sound engine is currently suppressing audio due to
    * motion-reduction settings. This is `true` in two cases:
@@ -51,50 +44,56 @@ export interface SensoryUIContextValue {
    * Use this to decide whether to surface a hint to users who report not
    * hearing sounds.
    */
-  reducedMotion: boolean;
+  reducedMotion: boolean
 }
 
-const SensoryUIContext = React.createContext<SensoryUIContextValue | null>(
-  null
-);
+const SensoryUIContext = React.createContext<SensoryUIContextValue | null>(null)
 
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
 export function useSensoryUI(): SensoryUIContextValue {
-  const ctx = React.useContext(SensoryUIContext);
+  const ctx = React.useContext(SensoryUIContext)
   if (!ctx) {
-    throw new Error(
-      "[sensory-ui] useSensoryUI must be called inside <SensoryUIProvider>"
-    );
+    throw new Error('[sensory-ui] useSensoryUI must be called inside <SensoryUIProvider>')
   }
-  return ctx;
+  return ctx
 }
 
 // ---------------------------------------------------------------------------
 // Reduced-motion hook
 // ---------------------------------------------------------------------------
 
-function useReducedMotion(
-  pref: SensoryUIConfig["reducedMotion"]
-): boolean {
+function useReducedMotion(pref: SensoryUIConfig['reducedMotion']): boolean {
   const [matches, setMatches] = React.useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  });
+    if (typeof window === 'undefined') {
+      return false
+    }
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  })
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+    if (typeof window === 'undefined') {
+      return
+    }
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const handler = (e: MediaQueryListEvent) => {
+      return setMatches(e.matches)
+    }
+    mq.addEventListener('change', handler)
+    return () => {
+      return mq.removeEventListener('change', handler)
+    }
+  }, [])
 
-  if (pref === "force-off") return true;
-  if (pref === "force-on") return false;
-  return matches;
+  if (pref === 'force-off') {
+    return true
+  }
+  if (pref === 'force-on') {
+    return false
+  }
+  return matches
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +101,7 @@ function useReducedMotion(
 // ---------------------------------------------------------------------------
 
 interface SensoryUIProviderProps {
-  children: React.ReactNode;
+  children: React.ReactNode
   /**
    * Optional config overrides merged on top of the defaults in config.ts.
    * Useful for Storybook, tests, or dynamic settings.
@@ -111,81 +110,80 @@ interface SensoryUIProviderProps {
    * // Disable all sounds in tests
    * <SensoryUIProvider config={{ enabled: false }}>
    */
-  config?: Partial<SensoryUIConfig>;
+  config?: Partial<SensoryUIConfig>
 }
 
-export function SensoryUIProvider({
-  children,
-  config: configOverride,
-}: SensoryUIProviderProps) {
+export function SensoryUIProvider({ children, config: configOverride }: SensoryUIProviderProps) {
   const config = React.useMemo(
-    () => mergeConfig(configOverride ?? {}),
+    () => {
+      return mergeConfig(configOverride ?? {})
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(configOverride)]
-  );
+    [JSON.stringify(configOverride)],
+  )
 
-  const [muted, setMuted] = React.useState(false);
-  const reducedMotion = useReducedMotion(config.reducedMotion);
-  const shouldPlay = config.enabled && !muted && !reducedMotion;
+  const [muted, setMuted] = React.useState(false)
+  const reducedMotion = useReducedMotion(config.reducedMotion)
+  const shouldPlay = config.enabled && !muted && !reducedMotion
 
   const playSound = React.useCallback(
-    async (
-      role: SoundRole,
-      options: PlaySoundOptions = {}
-    ): Promise<SoundPlayback | null> => {
-      if (typeof window === "undefined") return null;
-      if (!shouldPlay) return null;
+    async (role: SoundRole, options: PlaySoundOptions = {}): Promise<SoundPlayback | null> => {
+      if (typeof window === 'undefined') {
+        return null
+      }
+      if (!shouldPlay) {
+        return null
+      }
 
-      const finalVolume = (options.volume ?? 1) * config.volume;
+      const finalVolume = (options.volume ?? 1) * config.volume
 
       // Detect raw URLs / data-URIs passed via usePlaySound and bypass
       // role resolution — send them straight to the engine.
       const isRawSource =
-        typeof role === "string" &&
-        (role.startsWith("/") ||
-          role.startsWith("http://") ||
-          role.startsWith("https://") ||
-          role.startsWith("data:"));
+        typeof role === 'string' &&
+        (role.startsWith('/') ||
+          role.startsWith('http://') ||
+          role.startsWith('https://') ||
+          role.startsWith('data:'))
 
-      const source = isRawSource ? role : resolveRole(role, config);
-      if (!source) return null;
+      const source = isRawSource ? role : resolveRole(role, config)
+      if (!source) {
+        return null
+      }
 
       try {
-        return await enginePlaySound(source, { ...options, volume: finalVolume });
+        return await enginePlaySound(source, { ...options, volume: finalVolume })
       } catch (err) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[sensory-ui] Failed to play sound:", role, err);
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[sensory-ui] Failed to play sound:', role, err)
         }
-        return null;
+        return null
       }
     },
-    [shouldPlay, config]
-  );
+    [shouldPlay, config],
+  )
 
   // Clean up the AudioContext on unmount in development to avoid stale state
   // across HMR reloads.
   React.useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
+    if (process.env.NODE_ENV !== 'development') {
+      return
+    }
     return () => {
-      void closeAudioContext();
-    };
-  }, []);
+      void closeAudioContext()
+    }
+  }, [])
 
-  const value = React.useMemo(
-    () => ({
+  const value = React.useMemo(() => {
+    return {
       playSound,
       enabled: shouldPlay,
       volume: config.volume,
       muted,
       setMuted,
       reducedMotion,
-    }),
-    [playSound, shouldPlay, config.volume, muted, reducedMotion]
-  );
+    }
+  }, [playSound, shouldPlay, config.volume, muted, reducedMotion])
 
-  return (
-    <SensoryUIContext.Provider value={value}>
-      {children}
-    </SensoryUIContext.Provider>
-  );
+  return <SensoryUIContext.Provider value={value}>{children}</SensoryUIContext.Provider>
 }

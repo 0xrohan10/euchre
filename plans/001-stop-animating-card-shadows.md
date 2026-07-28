@@ -11,7 +11,15 @@
 Every playable-card state change repaints the shadow for every legal card. `src/App.css:114` currently says:
 
 ```css
-button.playing-card.playable { --card-y: -8px; box-shadow: 0 0 0 2px var(--gold), 0 8px 18px rgba(0,0,0,.3); transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+button.playing-card.playable {
+  --card-y: -8px;
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 8px 18px rgba(0, 0, 0, 0.3);
+  transition:
+    transform 150ms var(--ease-out),
+    box-shadow 150ms var(--ease-out);
+}
 ```
 
 This is a high-frequency interaction. `box-shadow` is paint-bound; only transform and opacity should animate.

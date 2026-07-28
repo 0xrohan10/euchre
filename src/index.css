@@ -92,7 +92,7 @@
   --danger: hsl(356 84% 74%);
   --shadow-color: 197 70% 3%;
 
-  --ease-out: cubic-bezier(.23, 1, .32, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 :root {
@@ -108,13 +108,37 @@
 }
 
 @supports (font-variation-settings: normal) {
-  :root { font-family: InterVariable, system-ui, sans-serif; font-optical-sizing: auto; }
+  :root {
+    font-family: InterVariable, system-ui, sans-serif;
+    font-optical-sizing: auto;
+  }
 }
 
-* { box-sizing: border-box; }
-html { min-width: 320px; background: var(--canvas); }
-body { margin: 0; min-width: 320px; min-height: 100dvh; }
-button, input { font: inherit; }
-button { color: inherit; }
-button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+* {
+  box-sizing: border-box;
+}
+html {
+  min-width: 320px;
+  background: var(--canvas);
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  color: inherit;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}

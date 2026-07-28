@@ -12,7 +12,9 @@ Cards respond physically, but header, bid, result, and settings controls only ch
 
 ```css
 /* src/App.css:204 */
-.rule-toggle > i::after { transition: transform 160ms ease; }
+.rule-toggle > i::after {
+  transition: transform 160ms ease;
+}
 ```
 
 ## Target

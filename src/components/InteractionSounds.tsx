@@ -17,16 +17,22 @@ export function InteractionSounds() {
 
   useEffect(() => {
     const playInteraction = (event: MouseEvent) => {
-      if (!event.isTrusted || !(event.target instanceof Element)) return
+      if (!event.isTrusted || !(event.target instanceof Element)) {
+        return
+      }
 
       const control = event.target.closest(interactiveSelector)
-      if (!control || control.matches(':disabled, [aria-disabled="true"]')) return
+      if (!control || control.matches(':disabled, [aria-disabled="true"]')) {
+        return
+      }
 
       playSound('interaction.subtle')
     }
 
     document.addEventListener('click', playInteraction)
-    return () => document.removeEventListener('click', playInteraction)
+    return () => {
+      return document.removeEventListener('click', playInteraction)
+    }
   }, [playSound])
 
   return null

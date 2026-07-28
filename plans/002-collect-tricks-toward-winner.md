@@ -12,7 +12,9 @@ Completed cards fade in place, while a separate timer clears state:
 
 ```css
 /* src/App.css:88 */
-.trick-area.complete .trick-card .playing-card { animation: collect-fade 180ms var(--ease-in-out) 1.36s forwards; }
+.trick-area.complete .trick-card .playing-card {
+  animation: collect-fade 180ms var(--ease-in-out) 1.36s forwards;
+}
 ```
 
 ```tsx
@@ -30,10 +32,22 @@ This happens five times per hand. The motion does not explain ownership, and CSS
 After 1300 ms of readable hold time, move all four cards toward the winning seat over exactly `220ms var(--ease-in-out)` while fading to zero and scaling to `.92`. Direction vectors:
 
 ```css
-[data-winner="0"] { --collect-x: 0px; --collect-y: 150px; }
-[data-winner="1"] { --collect-x: -180px; --collect-y: 0px; }
-[data-winner="2"] { --collect-x: 0px; --collect-y: -150px; }
-[data-winner="3"] { --collect-x: 180px; --collect-y: 0px; }
+[data-winner='0'] {
+  --collect-x: 0px;
+  --collect-y: 150px;
+}
+[data-winner='1'] {
+  --collect-x: -180px;
+  --collect-y: 0px;
+}
+[data-winner='2'] {
+  --collect-x: 0px;
+  --collect-y: -150px;
+}
+[data-winner='3'] {
+  --collect-x: 180px;
+  --collect-y: 0px;
+}
 ```
 
 Use animation completion, not a second timeout, to dispatch `collect-trick`.

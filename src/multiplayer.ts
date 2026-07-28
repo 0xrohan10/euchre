@@ -1,4 +1,12 @@
-import { chooseBotAction, reduceGame, type Card, type GameAction, type GameRules, type GameState, type Player } from './game'
+import {
+  chooseBotAction,
+  reduceGame,
+  type Card,
+  type GameAction,
+  type GameRules,
+  type GameState,
+  type Player,
+} from './game'
 
 export type RoomStatus = 'lobby' | 'playing' | 'paused' | 'finished'
 
@@ -48,7 +56,8 @@ export type RoomView = {
   rematch: RematchView | null
 }
 
-export type PlayerAction = Extract<GameAction,
+export type PlayerAction = Extract<
+  GameAction,
   | { type: 'exchange-kitty' }
   | { type: 'decline-exchange' }
   | { type: 'pass' }
@@ -63,7 +72,9 @@ export function projectGame(game: GameState, viewerSeat: Player): GameView {
   return {
     ...publicGame,
     hand: hands[viewerSeat],
-    handCounts: hands.map((hand) => hand.length) as GameView['handCounts'],
+    handCounts: hands.map((hand) => {
+      return hand.length
+    }) as GameView['handCounts'],
   }
 }
 
@@ -75,17 +86,32 @@ export function playerAt(viewerSeat: Player, relativeSeat: Player): Player {
   return ((viewerSeat + relativeSeat) % 4) as Player
 }
 
-export function statusForGame(game: Pick<GameState, 'phase'>): Extract<RoomStatus, 'playing' | 'finished'> {
+export function statusForGame(
+  game: Pick<GameState, 'phase'>,
+): Extract<RoomStatus, 'playing' | 'finished'> {
   return game.phase === 'match-over' ? 'finished' : 'playing'
 }
 
-export function statusForPresence(status: RoomStatus, phase: GameState['phase'] | null, hasDisconnectedHuman: boolean, hostDisconnected: boolean): RoomStatus {
-  if (status === 'lobby') return 'lobby'
-  if (phase === 'match-over') return hostDisconnected ? 'paused' : 'finished'
+export function statusForPresence(
+  status: RoomStatus,
+  phase: GameState['phase'] | null,
+  hasDisconnectedHuman: boolean,
+  hostDisconnected: boolean,
+): RoomStatus {
+  if (status === 'lobby') {
+    return 'lobby'
+  }
+  if (phase === 'match-over') {
+    return hostDisconnected ? 'paused' : 'finished'
+  }
   return hasDisconnectedHuman ? 'paused' : 'playing'
 }
 
-export function acceptsRoomAction(status: RoomStatus, phase: GameState['phase'], action: GameAction['type']): boolean {
+export function acceptsRoomAction(
+  status: RoomStatus,
+  phase: GameState['phase'],
+  action: GameAction['type'],
+): boolean {
   return action === 'new-match'
     ? status === 'finished' && phase === 'match-over'
     : status === 'playing'
@@ -97,9 +123,18 @@ export function acceptRoomUpdate(current: RoomView | null, next: RoomView): Room
 
 export function optimisticRoomAction(room: RoomView, action: GameAction): RoomView {
   const game = room.game
-  if (!game) return room
+  if (!game) {
+    return room
+  }
 
-  if (action.type === 'exchange-kitty' || action.type === 'decline-exchange' || action.type === 'next-hand' || action.type === 'new-match' || action.type === 'collect-trick' || action.type === 'set-rule') {
+  if (
+    action.type === 'exchange-kitty' ||
+    action.type === 'decline-exchange' ||
+    action.type === 'next-hand' ||
+    action.type === 'new-match' ||
+    action.type === 'collect-trick' ||
+    action.type === 'set-rule'
+  ) {
     return { ...room, game: { ...game, notice: 'Updating table...' } }
   }
 
@@ -114,8 +149,12 @@ export function optimisticRoomAction(room: RoomView, action: GameAction): RoomVi
   const projected = projectGame(optimisticGame, room.viewerSeat)
   const handCounts = [...currentHandCounts] as GameView['handCounts']
 
-  if (action.type === 'order-up') handCounts[game.dealer] += 1
-  if (action.type === 'play' || action.type === 'discard') handCounts[room.viewerSeat] -= 1
+  if (action.type === 'order-up') {
+    handCounts[game.dealer] += 1
+  }
+  if (action.type === 'play' || action.type === 'discard') {
+    handCounts[room.viewerSeat] -= 1
+  }
   projected.handCounts = handCounts
 
   return {
@@ -125,18 +164,40 @@ export function optimisticRoomAction(room: RoomView, action: GameAction): RoomVi
   }
 }
 
-export function canPassCalling(stickDealer: boolean, isDealer: boolean, callableSuitCount: number): boolean {
+export function canPassCalling(
+  stickDealer: boolean,
+  isDealer: boolean,
+  callableSuitCount: number,
+): boolean {
   return !stickDealer || !isDealer || callableSuitCount === 0
 }
 
-export function advanceBot(game: GameState, seats: readonly { seat: number; controller: 'human' | 'bot' }[]): GameState {
-  if (game.phase === 'trick-complete') return game
-  const active = seats.find(({ seat }) => seat === game.activePlayer)
-  if (active?.controller !== 'bot') return game
+export function advanceBot(
+  game: GameState,
+  seats: readonly { seat: number; controller: 'human' | 'bot' }[],
+): GameState {
+  if (game.phase === 'trick-complete') {
+    return game
+  }
+  const active = seats.find(({ seat }) => {
+    return seat === game.activePlayer
+  })
+  if (active?.controller !== 'bot') {
+    return game
+  }
   const action = chooseBotAction(game)
   return action ? reduceGame(game, action) : game
 }
 
-export function eligibleBotVoters<T extends { seat: number; userId: string | null; connected: boolean; controller: 'human' | 'bot' }>(seats: readonly T[], disconnectedSeat: number): T[] {
-  return seats.filter((seat) => seat.seat !== disconnectedSeat && seat.connected && seat.controller === 'human')
+export function eligibleBotVoters<
+  T extends {
+    seat: number
+    userId: string | null
+    connected: boolean
+    controller: 'human' | 'bot'
+  },
+>(seats: readonly T[], disconnectedSeat: number): T[] {
+  return seats.filter((seat) => {
+    return seat.seat !== disconnectedSeat && seat.connected && seat.controller === 'human'
+  })
 }

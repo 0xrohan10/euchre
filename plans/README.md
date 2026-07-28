@@ -2,15 +2,15 @@
 
 These plans audit source revision `0e0be33`. Before execution, compare every cited excerpt with the current source and stop on drift.
 
-| Plan | Title | Severity | Status | Depends on |
-| --- | --- | --- | --- | --- |
-| 001 | Stop animating card shadows | MEDIUM | TODO | — |
-| 002 | Collect tricks toward the winner | MEDIUM | TODO | — |
-| 003 | Add tactile control feedback | LOW | TODO | — |
-| 004 | Animate the settings sheet | LOW | TODO | — |
-| 005 | Transition bidding controls without layout jumps | LOW | TODO | — |
-| 006 | Animate hand and match results | LOW | TODO | — |
-| 007 | Preserve feedback with reduced motion | MEDIUM | TODO | 002, 003, 004, 005, 006 |
+| Plan | Title                                            | Severity | Status | Depends on              |
+| ---- | ------------------------------------------------ | -------- | ------ | ----------------------- |
+| 001  | Stop animating card shadows                      | MEDIUM   | TODO   | —                       |
+| 002  | Collect tricks toward the winner                 | MEDIUM   | TODO   | —                       |
+| 003  | Add tactile control feedback                     | LOW      | TODO   | —                       |
+| 004  | Animate the settings sheet                       | LOW      | TODO   | —                       |
+| 005  | Transition bidding controls without layout jumps | LOW      | TODO   | —                       |
+| 006  | Animate hand and match results                   | LOW      | TODO   | —                       |
+| 007  | Preserve feedback with reduced motion            | MEDIUM   | TODO   | 002, 003, 004, 005, 006 |
 
 ## Recommended Execution Order
 

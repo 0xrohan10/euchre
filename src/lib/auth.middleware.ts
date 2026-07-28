@@ -4,6 +4,8 @@ import { auth } from './auth.server'
 
 export const authMiddleware = createMiddleware({ type: 'function' }).server(async ({ next }) => {
   const session = await auth.api.getSession({ headers: getRequestHeaders() })
-  if (!session) throw new Response('Unauthorized', { status: 401 })
+  if (!session) {
+    throw new Response('Unauthorized', { status: 401 })
+  }
   return next({ context: { session } })
 })

@@ -18,7 +18,9 @@
   .trick-card.winner .playing-card,
   .trick-area.complete .trick-card .playing-card,
   .trick-result,
-  .won-trick-card { animation: none; }
+  .won-trick-card {
+    animation: none;
+  }
 }
 ```
 

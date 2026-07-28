@@ -6,11 +6,11 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_USER: postgres
     ports:
-      - "55437:5432"
+      - '55437:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d kitty"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d kitty']
       interval: 5s
       timeout: 5s
       retries: 5

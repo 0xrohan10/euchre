@@ -8,10 +8,14 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
     handlers: {
       GET: async ({ request, params }) => {
         const session = await auth.api.getSession({ headers: request.headers })
-        if (!session) return new Response('Unauthorized', { status: 401 })
+        if (!session) {
+          return new Response('Unauthorized', { status: 401 })
+        }
 
         const presence = gameRuntime.runPromise(
-          Effect.flatMap(GameService, (games) => games.setPresence(session.user.id, params.roomId, true)),
+          Effect.flatMap(GameService, (games) => {
+            return games.setPresence(session.user.id, params.roomId, true)
+          }),
         )
         try {
           await presence
@@ -30,14 +34,20 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
         let signature = ''
         let heartbeat = 0
         const close = () => {
-          if (closed) return
+          if (closed) {
+            return
+          }
           closed = true
-          if (timer) clearInterval(timer)
+          if (timer) {
+            clearInterval(timer)
+          }
         }
         const stream = new ReadableStream<Uint8Array>({
           async start(controller) {
             const publish = async () => {
-              if (closed) return
+              if (closed) {
+                return
+              }
               try {
                 const currentSession = await auth.api.getSession({ headers: request.headers })
                 if (!currentSession || currentSession.user.id !== session.user.id) {
@@ -45,33 +55,58 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
                   controller.close()
                   return
                 }
-                const view = await gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.tick(session.user.id, params.roomId)))
-                const nextSignature = `${view.version}:${view.status}:${view.seats.map((seat) => `${seat.connected}-${seat.controller}`).join(',')}:${view.disconnectVote?.approvals.join(',')}`
+                const view = await gameRuntime.runPromise(
+                  Effect.flatMap(GameService, (games) => {
+                    return games.tick(session.user.id, params.roomId)
+                  }),
+                )
+                const nextSignature = `${view.version}:${view.status}:${view.seats
+                  .map((seat) => {
+                    return `${seat.connected}-${seat.controller}`
+                  })
+                  .join(',')}:${view.disconnectVote?.approvals.join(',')}`
                 if (signature !== nextSignature) {
                   signature = nextSignature
-                  controller.enqueue(encoder.encode(`event: room\ndata: ${JSON.stringify(view)}\n\n`))
+                  controller.enqueue(
+                    encoder.encode(`event: room\ndata: ${JSON.stringify(view)}\n\n`),
+                  )
                 }
                 heartbeat += 1
-                if (heartbeat % 15 === 0) controller.enqueue(encoder.encode(': heartbeat\n\n'))
+                if (heartbeat % 15 === 0) {
+                  controller.enqueue(encoder.encode(': heartbeat\n\n'))
+                }
               } catch (error) {
-                if (error instanceof GameServiceError && (error.code === 'not-found' || error.code === 'forbidden')) {
+                if (
+                  error instanceof GameServiceError &&
+                  (error.code === 'not-found' || error.code === 'forbidden')
+                ) {
                   controller.enqueue(encoder.encode('event: gone\ndata: {}\n\n'))
                   close()
                   controller.close()
                   return
                 }
                 try {
-                  if (!closed) controller.enqueue(encoder.encode('event: error\ndata: {}\n\n'))
+                  if (!closed) {
+                    controller.enqueue(encoder.encode('event: error\ndata: {}\n\n'))
+                  }
                 } catch {
                   close()
                 }
               }
             }
-            request.signal.addEventListener('abort', () => {
-              close()
-            }, { once: true })
+            request.signal.addEventListener(
+              'abort',
+              () => {
+                close()
+              },
+              { once: true },
+            )
             await publish()
-            if (!closed) timer = setInterval(() => void publish(), 500)
+            if (!closed) {
+              timer = setInterval(() => {
+                return void publish()
+              }, 500)
+            }
           },
           cancel: close,
         })

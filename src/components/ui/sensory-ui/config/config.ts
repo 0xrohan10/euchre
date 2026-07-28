@@ -1,12 +1,12 @@
-import type { SoundCategory, SoundRole } from "./sound-roles";
-import type { SoundSource } from "./engine";
-import { packRegistry, type SoundPackName } from "./registry";
+import type { SoundCategory, SoundRole } from './sound-roles'
+import type { SoundSource } from './engine'
+import { packRegistry, type SoundPackName } from './registry'
 
 export interface SensoryUIConfig {
   /** Global kill-switch. false silences everything. */
-  enabled: boolean;
+  enabled: boolean
   /** Master volume multiplier. Range: 0–1. */
-  volume: number;
+  volume: number
   /**
    * Sound pack name. Selects a built-in pack or falls back to "aero".
    *
@@ -16,9 +16,9 @@ export interface SensoryUIConfig {
    * Individual roles can still be overridden via `overrides` regardless
    * of which pack is active.
    */
-  theme: SoundPackName | (string & {});
+  theme: SoundPackName | (string & {})
   /** Per-category enable/disable toggles. */
-  categories: Record<SoundCategory, boolean>;
+  categories: Record<SoundCategory, boolean>
   /**
    * Role-level source overrides.
    * Values can be:
@@ -26,14 +26,14 @@ export interface SensoryUIConfig {
    *   - A base64 data URI (e.g. "data:audio/mp3;base64,...")
    * These take precedence over the active sound pack.
    */
-  overrides: Partial<Record<SoundRole, string>>;
+  overrides: Partial<Record<SoundRole, string>>
   /**
    * How to respond to prefers-reduced-motion.
    * "inherit"   → respect the OS/browser setting
    * "force-off" → always suppress sounds
    * "force-on"  → always play sounds regardless of user pref
    */
-  reducedMotion: "inherit" | "force-off" | "force-on";
+  reducedMotion: 'inherit' | 'force-off' | 'force-on'
 }
 
 /**
@@ -44,7 +44,7 @@ export interface SensoryUIConfig {
 export const defaultConfig: SensoryUIConfig = {
   enabled: true,
   volume: 0.35,
-  theme: "aero",
+  theme: 'aero',
   categories: {
     interaction: true,
     overlay: true,
@@ -53,12 +53,10 @@ export const defaultConfig: SensoryUIConfig = {
     hero: false, // Disabled by default - must be explicitly enabled
   },
   overrides: {},
-  reducedMotion: "inherit",
-};
+  reducedMotion: 'inherit',
+}
 
-export function mergeConfig(
-  user: Partial<SensoryUIConfig>
-): SensoryUIConfig {
+export function mergeConfig(user: Partial<SensoryUIConfig>): SensoryUIConfig {
   return {
     ...defaultConfig,
     ...user,
@@ -70,7 +68,7 @@ export function mergeConfig(
       ...defaultConfig.overrides,
       ...(user.overrides ?? {}),
     },
-  };
+  }
 }
 
 /**
@@ -82,22 +80,23 @@ export function mergeConfig(
  *   3. packRegistry.aero[role]   - fallback to "aero" if theme name is unknown
  *   4. null                      - category disabled or role not found
  */
-export function resolveRole(
-  role: SoundRole,
-  config: SensoryUIConfig
-): SoundSource | null {
-  const category = role.split(".")[0] as SoundCategory;
+export function resolveRole(role: SoundRole, config: SensoryUIConfig): SoundSource | null {
+  const category = role.split('.')[0] as SoundCategory
 
-  if (config.categories[category] === false) return null;
+  if (config.categories[category] === false) {
+    return null
+  }
 
   // User override takes highest priority (always a string/URL)
-  const override = config.overrides[role];
-  if (override) return override;
+  const override = config.overrides[role]
+  if (override) {
+    return override
+  }
 
   // Look up the active pack, fall back to "aero" if pack name is unknown
-  const packName = config.theme as SoundPackName;
-  const pack = packRegistry[packName] ?? packRegistry.aero;
-  const source = pack[role];
+  const packName = config.theme as SoundPackName
+  const pack = packRegistry[packName] ?? packRegistry.aero
+  const source = pack[role]
 
-  return source ?? null;
+  return source ?? null
 }

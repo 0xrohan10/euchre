@@ -1,6 +1,20 @@
 import { expect, it } from 'vitest'
 import { createDeck, createGame } from './game'
-import { acceptRoomUpdate, acceptsRoomAction, advanceBot, canPassCalling, eligibleBotVoters, optimisticRoomAction, playerAt, projectGame, relativePlayer, statusForGame, statusForPresence, type RoomView, type SeatView } from './multiplayer'
+import {
+  acceptRoomUpdate,
+  acceptsRoomAction,
+  advanceBot,
+  canPassCalling,
+  eligibleBotVoters,
+  optimisticRoomAction,
+  playerAt,
+  projectGame,
+  relativePlayer,
+  statusForGame,
+  statusForPresence,
+  type RoomView,
+  type SeatView,
+} from './multiplayer'
 
 it('projects only the authenticated player hand', () => {
   const game = createGame(createDeck())
@@ -61,7 +75,11 @@ it('optimistically moves a played card from the hand to the trick', () => {
 
 it('optimistically advances bidding with the shared game reducer', () => {
   const game = createGame(createDeck())
-  const room = { id: 'room', viewerSeat: game.activePlayer, game: projectGame(game, game.activePlayer) } as RoomView
+  const room = {
+    id: 'room',
+    viewerSeat: game.activePlayer,
+    game: projectGame(game, game.activePlayer),
+  } as RoomView
 
   const passed = optimisticRoomAction(room, { type: 'pass' })
 
@@ -73,7 +91,11 @@ it('optimistically advances bidding with the shared game reducer', () => {
 it('optimistically orders up the dealer', () => {
   const game = createGame(createDeck())
   game.rules.requireNaturalTrump = false
-  const room = { id: 'room', viewerSeat: game.activePlayer, game: projectGame(game, game.activePlayer) } as RoomView
+  const room = {
+    id: 'room',
+    viewerSeat: game.activePlayer,
+    game: projectGame(game, game.activePlayer),
+  } as RoomView
 
   const ordered = optimisticRoomAction(room, { type: 'order-up', alone: true })
 
@@ -101,7 +123,11 @@ it('counts only connected human voters', () => {
     { seat: 3, userId: 'd', connected: true, controller: 'bot' },
   ] as SeatView[]
 
-  expect(eligibleBotVoters(seats, 0).map((seat) => seat.userId)).toEqual(['b'])
+  expect(
+    eligibleBotVoters(seats, 0).map((seat) => {
+      return seat.userId
+    }),
+  ).toEqual(['b'])
 })
 
 it('advances only one bot turn so each decision can be shown', () => {
@@ -120,5 +146,9 @@ it('advances only one bot turn so each decision can be shown', () => {
   const result = advanceBot(game, seats)
 
   expect(result.activePlayer).toBe(2)
-  expect(result.trick.map(({ player }) => player)).toEqual([1])
+  expect(
+    result.trick.map(({ player }) => {
+      return player
+    }),
+  ).toEqual([1])
 })
