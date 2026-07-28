@@ -18,7 +18,7 @@
   gap: 28px;
   padding: 34px;
   border-radius: 18px;
-  background: var(--panel);
+  background: var(--panel-raised);
   box-shadow: inset 0 0 0 1px var(--line);
 }
 .lobby-card {
@@ -361,7 +361,7 @@
   gap: 8px;
   padding: 14px;
   border-radius: 14px;
-  background: var(--panel-raised);
+  background: var(--panel);
   box-shadow:
     0 18px 48px hsl(var(--shadow-color) / 0.45),
     inset 0 0 0 1px var(--line-strong);
@@ -1066,9 +1066,6 @@ button.playing-card.playable:active {
     0 10px 28px hsl(var(--shadow-color) / 0.22);
   backdrop-filter: blur(10px);
 }
-.player-console.has-controls {
-  grid-template-columns: auto auto;
-}
 .player-console .player-identity {
   min-width: 0;
 }
@@ -1079,6 +1076,29 @@ button.playing-card.playable:active {
   backdrop-filter: none;
 }
 .player-console .player-badge.active {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.player-identity.team-red > .player-badge,
+.player-console.team-red {
+  background: var(--color-strawberry-red-900);
+  box-shadow:
+    inset 0 0 0 1px hsl(348.2 100% 30% / 0.72),
+    0 10px 28px hsl(var(--shadow-color) / 0.22);
+}
+.player-identity.team-black > .player-badge,
+.player-console.team-black {
+  background: hsl(270 7% 17% / 0.94);
+  box-shadow:
+    inset 0 0 0 1px hsl(315 10% 70% / 0.2),
+    0 10px 28px hsl(var(--shadow-color) / 0.22);
+}
+.player-console.team-red .player-badge,
+.player-console.team-black .player-badge {
+  background: transparent;
+  box-shadow: none;
+}
+.player-console.team-red .player-badge.active,
+.player-console.team-black .player-badge.active {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .status-light {
@@ -1104,10 +1124,20 @@ button.playing-card.playable:active {
   }
 }
 .bid-controls {
+  width: max-content;
+  max-width: calc(100vw - 280px);
+  min-height: 50px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  padding: 6px;
+  border-radius: 12px;
+  background: hsl(282.4 48.6% 6.9% / 0.88);
+  box-shadow:
+    inset 0 0 0 1px hsl(315 23.5% 80% / 0.14),
+    0 10px 28px hsl(var(--shadow-color) / 0.22);
+  backdrop-filter: blur(10px);
 }
 .alone-toggle {
   display: flex;
@@ -1134,6 +1164,18 @@ button.playing-card.playable:active {
   color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
+}
+.pass-button {
+  min-width: 76px;
+  background: var(--color-lilac-200);
+  color: var(--color-midnight-violet-950);
+  font-weight: 700;
+  box-shadow:
+    inset 0 0 0 1px var(--color-lilac-100),
+    0 2px 8px hsl(var(--shadow-color) / 0.28);
+}
+.pass-button:hover {
+  background: var(--color-lilac-100);
 }
 .suit-buttons {
   display: flex;
@@ -1485,7 +1527,7 @@ button.playing-card.playable:active {
   justify-items: center;
   padding: 26px 26px 24px;
   border-radius: 12px;
-  background: var(--panel-raised);
+  background: var(--panel);
   color: var(--text);
   text-align: center;
   box-shadow:
@@ -1493,12 +1535,22 @@ button.playing-card.playable:active {
     inset 0 0 0 1px var(--line-strong);
 }
 .result-dialog h2 {
-  max-width: 30ch;
-  margin: 8px 0 0;
-  font-size: 18px;
-  font-weight: 620;
-  letter-spacing: -0.025em;
+  max-width: 16ch;
+  margin: 10px 0 0;
+  color: var(--color-ocean-blue-200);
+  font-size: clamp(28px, 4vw, 36px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.045em;
   text-wrap: balance;
+}
+.result-description {
+  max-width: 34ch;
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.55;
+  text-wrap: pretty;
 }
 .result-actions {
   width: 100%;
@@ -1551,6 +1603,35 @@ button.playing-card.playable:active {
 }
 .result-actions .primary-button {
   min-width: 116px;
+}
+.result-actions .new-game-button {
+  width: 100%;
+  min-height: 58px;
+  border-radius: 9px;
+  background: var(--color-ocean-blue-200);
+  font-size: 16px;
+  box-shadow:
+    0 8px 24px hsl(var(--shadow-color) / 0.28),
+    inset 0 0 0 1px var(--color-ocean-blue-100);
+}
+.result-actions .new-game-button:not(:disabled):hover {
+  background: var(--color-ocean-blue-100);
+}
+.result-actions .next-hand-button {
+  min-width: 132px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-weight: 650;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.result-actions .next-hand-button:hover {
+  background: var(--line);
+}
+.result-actions .leave-game-button {
+  flex-basis: 100%;
+  min-height: 40px;
+  color: var(--danger);
+  font-weight: 650;
 }
 
 /* Desktop / large tablet: denser chrome, inline header actions */
@@ -1811,21 +1892,14 @@ button.playing-card.playable:active {
     gap: 5px 8px;
     padding: 5px;
   }
-  .player-console.has-controls {
+  .bid-controls {
     width: min(620px, calc(100vw - 40px));
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .player-console.has-controls .bid-controls {
-    grid-column: 1 / -1;
+    max-width: calc(100vw - 40px);
     flex-wrap: wrap;
-    padding: 2px 4px 3px;
+    padding: 7px 9px;
   }
   .player-console .player-badge {
     min-width: 0;
-  }
-  .bid-controls {
-    width: 100%;
-    justify-content: center;
   }
 }
 
@@ -1955,7 +2029,7 @@ button.playing-card.playable:active {
     margin-left: -8px;
   }
   .player-console,
-  .player-console.has-controls {
+  .bid-controls {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
   }

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { authClient } from '../lib/auth-client'
 import { hasNaturalTrump, legalCards, sortHand, SUITS, type Card } from '../game/card'
-import { teamOf, type Player } from '../game/player'
+import { teamName, teamOf, type Player } from '../game/player'
 import type { GameAction } from '../game/state'
 import {
   canPassCalling,
@@ -37,6 +37,35 @@ function collectedTrickCount(game: GameView, player: Player) {
   return game.playerTricks[player] - Number(faceUpWinner === player)
 }
 
+function resultCopy(game: GameView) {
+  if (game.maker === null) {
+    return { title: 'Hand complete', description: game.notice }
+  }
+
+  const makerTeam = teamOf(game.maker)
+  const tricks = game.tricks[makerTeam]
+  const scoringTeam = tricks < 3 ? ((1 - makerTeam) as 0 | 1) : makerTeam
+  const points = tricks < 3 ? 2 : tricks === 5 ? (game.lonePlayer === null ? 2 : 4) : 1
+  const makerName = teamName(makerTeam)
+  const scoringName = teamName(scoringTeam)
+  const trickLabel = tricks === 1 ? 'trick' : 'tricks'
+
+  const handTitle = tricks < 3 ? 'Euchred' : tricks === 5 ? 'Clean sweep' : 'Hand won'
+  const handDescription =
+    tricks < 3
+      ? `${makerName} won ${tricks} ${trickLabel}, short of the three needed. ${scoringName} scores 2 points.`
+      : tricks === 5
+        ? `${makerName} won all five tricks and scores ${points} points${game.lonePlayer === null ? '.' : ' for going alone.'}`
+        : `${makerName} won ${tricks} tricks and scores 1 point.`
+
+  return game.phase === 'match-over'
+    ? {
+        title: `${scoringName} wins`,
+        description: `${handDescription} Final score: ${game.score[0]} to ${game.score[1]}.`,
+      }
+    : { title: handTitle, description: handDescription }
+}
+
 export function GameTable({
   room,
   onRoom,
@@ -63,6 +92,7 @@ export function GameTable({
   const viewerSeat = seats.get(viewer)
   const viewerTeam = teamOf(viewer)
   const opponentTeam = (1 - viewerTeam) as 0 | 1
+  const result = resultCopy(game)
   const isTurn = !pending && room.status === 'playing' && game.activePlayer === viewer
   const hand = sortHand(game.hand, game.trump)
   const legal =
@@ -283,7 +313,7 @@ export function GameTable({
             {viewer === game.dealer ? 'Pick up' : 'Order up'}
           </button>
           <button
-            className="quiet-button"
+            className="quiet-button pass-button"
             onClick={() => {
               return void act({ type: 'pass' })
             }}
@@ -316,7 +346,7 @@ export function GameTable({
             availableSuits.length,
           ) && (
             <button
-              className="quiet-button"
+              className="quiet-button pass-button"
               onClick={() => {
                 return void act({ type: 'pass' })
               }}
@@ -423,8 +453,9 @@ export function GameTable({
               const player = playerAt(viewer, relative)
               const occupant = seats.get(player)
               const position = ['south', 'west', 'north', 'east'][relative]
+              const teamClass = teamOf(player) === 0 ? 'team-black' : 'team-red'
               const identity = (
-                <div className="player-identity">
+                <div className={`player-identity ${teamClass}`}>
                   <PlayerBadge
                     occupant={occupant}
                     active={game.activePlayer === player}
@@ -445,6 +476,7 @@ export function GameTable({
                 <div className={`seat seat-${position}`} key={player}>
                   {relative === 0 ? (
                     <>
+                      {bidControls}
                       <div className="hand-zone">
                         <div className="human-hand">
                           {hand.map((card) => {
@@ -471,10 +503,7 @@ export function GameTable({
                           })}
                         </div>
                       </div>
-                      <div className={`player-console ${controls ? 'has-controls' : ''}`}>
-                        {identity}
-                        {bidControls}
-                      </div>
+                      <div className={`player-console ${teamClass}`}>{identity}</div>
                     </>
                   ) : relative === 1 || relative === 3 ? (
                     <>
@@ -525,11 +554,15 @@ export function GameTable({
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="result-title"
+                    aria-describedby="result-description"
                   >
                     <span className="eyebrow">
                       {game.phase === 'match-over' ? 'Match complete' : 'Hand complete'}
                     </span>
-                    <h2 id="result-title">{game.notice}</h2>
+                    <h2 id="result-title">{result.title}</h2>
+                    <p id="result-description" className="result-description">
+                      {result.description}
+                    </p>
                     <div className="result-actions">
                       {game.phase === 'match-over' && room.rematch ? (
                         <>
@@ -557,29 +590,50 @@ export function GameTable({
                           </p>
                           <button
                             type="button"
-                            className="quiet-button"
+                            className="quiet-button leave-game-button"
                             disabled={pending}
                             onClick={() => {
                               return void returnToParty()
                             }}
                           >
-                            Return to lobby
+                            Leave game
                           </button>
                         </>
-                      ) : room.hostUserId === viewerSeat?.userId ? (
-                        <button
-                          type="button"
-                          className="primary-button"
-                          onClick={() => {
-                            return void act({
-                              type: game.phase === 'hand-over' ? 'next-hand' : 'new-match',
-                            })
-                          }}
-                        >
-                          {game.phase === 'hand-over' ? 'Next hand' : 'Play again'}
-                        </button>
                       ) : (
-                        <p>Waiting for the host to continue.</p>
+                        <>
+                          {room.hostUserId === viewerSeat?.userId ? (
+                            <button
+                              type="button"
+                              className={
+                                game.phase === 'hand-over'
+                                  ? 'quiet-button next-hand-button'
+                                  : 'primary-button new-game-button'
+                              }
+                              disabled={pending}
+                              onClick={() => {
+                                return void act({
+                                  type: game.phase === 'hand-over' ? 'next-hand' : 'new-match',
+                                })
+                              }}
+                            >
+                              {game.phase === 'hand-over' ? 'Next hand' : 'New game'}
+                            </button>
+                          ) : (
+                            <p>Waiting for the host to continue.</p>
+                          )}
+                          {game.phase === 'match-over' && (
+                            <button
+                              type="button"
+                              className="quiet-button leave-game-button"
+                              disabled={pending}
+                              onClick={() => {
+                                return setConfirmLeave(true)
+                              }}
+                            >
+                              Leave game
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </section>
@@ -668,7 +722,9 @@ export function GameTable({
               <p>
                 {partyGame
                   ? 'A bot will finish your seat. Your partner will become the party creator and can invite someone new.'
-                  : 'This match will be abandoned and cannot be resumed.'}
+                  : game.phase === 'match-over'
+                    ? 'This match is complete. You’ll return to the lobby.'
+                    : 'This match will be abandoned and cannot be resumed.'}
               </p>
               <div className="dialog-actions">
                 <button

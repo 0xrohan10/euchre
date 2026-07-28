@@ -1,6 +1,6 @@
 import { SUITS, hasNaturalTrump, legalCards, trickWinner } from './card'
 import { createGame, deal, farmersHandRank } from './deal'
-import { next, nextActive, teamOf } from './player'
+import { next, nextActive, teamName, teamOf } from './player'
 import { emptyWonTricks, type GameAction, type GameState } from './state'
 
 function beginPlay(state: GameState): GameState {
@@ -28,15 +28,15 @@ function scoreHand(state: GameState): GameState {
   const matchOver = score[scoringTeam] >= 10
   const result =
     made < 3
-      ? `Team ${makerTeam + 1} was euchred.`
+      ? `${teamName(makerTeam)} was euchred.`
       : made === 5
         ? 'A march!'
-        : `Team ${makerTeam + 1} made their bid.`
+        : `${teamName(makerTeam)} made their bid.`
   return {
     ...state,
     score,
     phase: matchOver ? 'match-over' : 'hand-over',
-    notice: `${result} Team ${scoringTeam + 1} scores ${points}.`,
+    notice: `${result} ${teamName(scoringTeam)} scores ${points}.`,
   }
 }
 
