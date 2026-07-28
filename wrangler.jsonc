@@ -3,7 +3,7 @@
   "name": "euchre",
   "compatibility_date": "2026-07-27",
   "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/worker.ts",
   "observability": {
     "enabled": true,
   },
@@ -13,6 +13,27 @@
       "id": "29d914fb9e6f4cd0acd5a2239dd9d247",
     },
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "RATING_QUEUE",
+        "queue": "rating-reconciliation",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "rating-reconciliation",
+        "dead_letter_queue": "rating-reconciliation-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "max_concurrency": 1,
+      },
+    ],
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
   "placement": {
     "region": "aws:us-east-1",
   },
