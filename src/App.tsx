@@ -52,6 +52,34 @@ import {
 import './App.css'
 
 const SUIT_SYMBOL: Record<Suit, string> = { clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }
+const RULES_STORAGE_KEY = 'kitty-rules:v1'
+const SEAT_ORDER = [0, 1, 2, 3] as const
+
+function loadStoredRules(): GameRules {
+  try {
+    const raw = localStorage.getItem(RULES_STORAGE_KEY) ?? localStorage.getItem('kitty-rules')
+    const saved = JSON.parse(raw ?? 'null') as Partial<GameRules> | null
+    if (
+      saved &&
+      typeof saved.stickDealer === 'boolean' &&
+      typeof saved.requireNaturalTrump === 'boolean' &&
+      typeof saved.allowAloneWhenOrderingPartner === 'boolean'
+    ) {
+      return { ...DEFAULT_RULES, ...saved }
+    }
+  } catch {
+    /* Keep the standard rules when saved preferences are unreadable. */
+  }
+  return { ...DEFAULT_RULES }
+}
+
+function seatsByNumber(seats: SeatView[]): Map<number, SeatView> {
+  const bySeat = new Map<number, SeatView>()
+  for (const seat of seats) {
+    bySeat.set(seat.seat, seat)
+  }
+  return bySeat
+}
 
 function CardFace({
   card,
@@ -502,32 +530,19 @@ function Lobby({
   const [setupMode, setSetupMode] = useState<'single-player' | 'multiplayer' | 'partner' | null>(
     null,
   )
-  const [rules, setRules] = useState<GameRules>({ ...DEFAULT_RULES })
+  const [rules, setRules] = useState<GameRules>(loadStoredRules)
   const [code, setCode] = useState('')
   const [error, setError] = useState(initialError ?? '')
   const [pending, setPending] = useState(false)
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(
-        localStorage.getItem('kitty-rules') ?? 'null',
-      ) as Partial<GameRules> | null
-      if (
-        saved &&
-        typeof saved.stickDealer === 'boolean' &&
-        typeof saved.requireNaturalTrump === 'boolean' &&
-        typeof saved.allowAloneWhenOrderingPartner === 'boolean'
-      ) {
-        setRules({ ...DEFAULT_RULES, ...saved })
-      }
-    } catch {
-      /* Keep the standard rules when saved preferences are unreadable. */
-    }
-  }, [])
+  const lobbySeats = room ? seatsByNumber(room.seats) : null
 
   function setRule(rule: keyof GameRules, enabled: boolean) {
-    const next = { ...rules, [rule]: enabled }
-    setRules(next)
-    localStorage.setItem('kitty-rules', JSON.stringify(next))
+    setRules((current) => {
+      const next = { ...current, [rule]: enabled }
+      localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(next))
+      localStorage.removeItem('kitty-rules')
+      return next
+    })
   }
   async function run(operation: () => Promise<RoomView>) {
     setPending(true)
@@ -614,13 +629,11 @@ function Lobby({
               {room.code} · Copy invite
             </button>
             <div className="lobby-seats">
-              {[0, 1, 2, 3].map((seat) => {
+              {SEAT_ORDER.map((seat) => {
                 return (
                   <PlayerBadge
                     key={seat}
-                    occupant={room.seats.find((item) => {
-                      return item.seat === seat
-                    })}
+                    occupant={lobbySeats?.get(seat)}
                     active={false}
                     dealer={false}
                   />
@@ -881,6 +894,8 @@ function GameTable({
       return seat.userId === null
     })
   const viewer = room.viewerSeat
+  const seats = seatsByNumber(room.seats)
+  const viewerSeat = seats.get(viewer)
   const viewerTeam = teamOf(viewer)
   const opponentTeam = (1 - viewerTeam) as 0 | 1
   const isTurn = !pending && room.status === 'playing' && game.activePlayer === viewer
@@ -1218,11 +1233,9 @@ function GameTable({
             {farmerExchange && (
               <FarmerExchange cards={farmerExchange.cards} player={farmerExchange.player} />
             )}
-            {([0, 1, 2, 3] as Player[]).map((relative) => {
+            {(SEAT_ORDER as readonly Player[]).map((relative) => {
               const player = playerAt(viewer, relative)
-              const occupant = room.seats.find((seat) => {
-                return seat.seat === player
-              })
+              const occupant = seats.get(player)
               const position = ['south', 'west', 'north', 'east'][relative]
               const badge = (
                 <PlayerBadge
@@ -1355,10 +1368,7 @@ function GameTable({
                             Return to lobby
                           </button>
                         </>
-                      ) : room.hostUserId ===
-                        room.seats.find((seat) => {
-                          return seat.seat === viewer
-                        })?.userId ? (
+                      ) : room.hostUserId === viewerSeat?.userId ? (
                         <button
                           type="button"
                           className="primary-button"
@@ -1386,14 +1396,7 @@ function GameTable({
             <div className="settings-header">
               <div>
                 <span className="eyebrow">Unanimous decision</span>
-                <h2>
-                  {
-                    room.seats.find((seat) => {
-                      return seat.seat === room.disconnectVote?.disconnectedSeat
-                    })?.name
-                  }{' '}
-                  disconnected
-                </h2>
+                <h2>{seats.get(room.disconnectVote?.disconnectedSeat ?? -1)?.name} disconnected</h2>
               </div>
             </div>
             <div className="settings-section">
@@ -1508,13 +1511,16 @@ export default function App() {
     },
     [navigate],
   )
-  const leaveRoom = (leftParty = false) => {
-    setRoom(null)
-    if (leftParty) {
-      setParty(null)
-    }
-    void navigate({ to: '/', replace: true })
-  }
+  const leaveRoom = useCallback(
+    (leftParty = false) => {
+      setRoom(null)
+      if (leftParty) {
+        setParty(null)
+      }
+      void navigate({ to: '/', replace: true })
+    },
+    [navigate],
+  )
 
   useEffect(() => {
     if (!session || loaded) {

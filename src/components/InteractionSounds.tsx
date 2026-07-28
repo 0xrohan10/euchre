@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useSensoryUI } from './ui/sensory-ui/config/provider'
 
 const interactiveSelector = [
@@ -14,6 +14,8 @@ const interactiveSelector = [
 
 export function InteractionSounds() {
   const { playSound } = useSensoryUI()
+  const playSoundRef = useRef(playSound)
+  playSoundRef.current = playSound
 
   useEffect(() => {
     const playInteraction = (event: MouseEvent) => {
@@ -26,14 +28,14 @@ export function InteractionSounds() {
         return
       }
 
-      playSound('interaction.subtle')
+      playSoundRef.current('interaction.subtle')
     }
 
     document.addEventListener('click', playInteraction)
     return () => {
       return document.removeEventListener('click', playInteraction)
     }
-  }, [playSound])
+  }, [])
 
   return null
 }
