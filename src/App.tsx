@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { authClient } from './lib/auth-client'
 import { cardBackImage, cardImage, scoreFiveImages } from './card-assets'
@@ -24,6 +24,43 @@ function Brand() {
     </svg>
     <span>Euchs</span>
   </a>
+}
+
+function HowToPlay({ label = 'Rules' }: { label?: string }) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+
+  return <>
+    <button className="quiet-button" type="button" onClick={() => dialogRef.current?.showModal()}>{label}</button>
+    <dialog className="rules-dialog" ref={dialogRef} aria-labelledby="how-to-play-title" aria-describedby="how-to-play-summary" onClick={(event) => {
+      if (event.target === event.currentTarget) event.currentTarget.close()
+    }}>
+      <div className="rules-panel">
+        <header className="rules-header">
+          <div><span className="eyebrow">Euchre in five minutes</span><h2 id="how-to-play-title">How to play</h2></div>
+          <button className="quiet-button" type="button" onClick={() => dialogRef.current?.close()}>Close</button>
+        </header>
+        <div className="rules-content">
+          <p className="rules-intro" id="how-to-play-summary">Win tricks with your partner, call trump wisely, and be the first team to score 10 points.</p>
+          <div className="rules-grid">
+            <section className="rule-step"><span>1</span><div><h3>Teams and cards</h3><p>Four players form two teams, with partners seated across from each other. The deck has 24 cards: 9, 10, jack, queen, king, and ace in each suit. Everyone gets five cards.</p></div></section>
+            <section className="rule-step"><span>2</span><div><h3>Choose trump</h3><p>A card is turned up. Starting left of the dealer, players may order up its suit or pass. If everyone passes, players call any other suit. The dealer must call if the choice returns to them.</p></div></section>
+            <section className="rule-step"><span>3</span><div><h3>Know the bowers</h3><p>The jack of trump is the highest card, called the right bower. The jack of the same color is the second highest, called the left bower, and counts as trump instead of its printed suit.</p></div></section>
+            <section className="rule-step"><span>4</span><div><h3>Play five tricks</h3><p>The player left of the dealer leads. Follow the led suit when you can; otherwise, play any card. Trump beats every non-trump card. The trick winner leads next.</p></div></section>
+          </div>
+          <section className="rules-callout"><div><span className="eyebrow">Going alone</span><h3>Leave your partner out for a bigger reward.</h3></div><p>When calling trump, you may go alone. Your partner sits out the hand, and taking all five tricks earns 4 points.</p></section>
+          <section className="scoring-rules">
+            <div><span className="eyebrow">Scoring</span><h3>Make at least three tricks.</h3></div>
+            <dl>
+              <div><dt>Makers win 3 or 4 tricks</dt><dd>1 point</dd></div>
+              <div><dt>Makers win all 5 tricks</dt><dd>2 points</dd></div>
+              <div><dt>Lone player wins all 5</dt><dd>4 points</dd></div>
+              <div><dt>Defenders stop the makers</dt><dd>2 points</dd></div>
+            </dl>
+          </section>
+        </div>
+      </div>
+    </dialog>
+  </>
 }
 
 function HiddenHand({ count }: { count: number }) {
@@ -84,7 +121,7 @@ function AuthScreen() {
         {error && <p className="form-error">{error}</p>}
         <button className="primary-button" disabled={pending}>{pending ? 'Please wait…' : mode === 'sign-in' ? 'Sign in' : 'Create account'}</button>
       </form>
-      <button className="quiet-button" onClick={() => setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in')}>{mode === 'sign-in' ? 'Create an account' : 'Already have an account'}</button>
+      <div className="auth-secondary-actions"><button className="quiet-button" onClick={() => setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in')}>{mode === 'sign-in' ? 'Create an account' : 'Already have an account'}</button><HowToPlay label="How to play" /></div>
     </section>
   </main>
 }
@@ -113,7 +150,7 @@ function Lobby({ room, onRoom, onLeave, userName }: { room: RoomView | null; onR
     }
   }
   return <main className="lobby-shell">
-    <header className="app-header"><Brand /><div className="header-actions"><span className="eyebrow">{userName}</span><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
+    <header className="app-header"><Brand /><div className="header-actions"><span className="eyebrow">{userName}</span><HowToPlay /><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
     <section className="lobby-card">
       {room ? <>
         <span className="eyebrow">Invite table</span><h1>Waiting for four</h1><button className="room-code large" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/games/${room.code}`)}>{room.code} · Copy invite</button>
@@ -182,7 +219,7 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
   const controls = isTurn && (game.phase === 'ordering' || game.phase === 'calling')
   const availableSuits = SUITS.filter((suit) => game.phase === 'calling' && suit !== game.upCard.suit && (!game.rules.requireNaturalTrump || hasNaturalTrump(game.hand, suit)))
   return <div className="game-shell">
-    <header className="app-header"><Brand /><div className="room-meta"><span className="eyebrow">{singlePlayer ? 'Single player' : 'Table'}</span>{!singlePlayer && <button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/games/${room.code}`)}>{room.code}</button>}</div><div className="header-actions">{singlePlayer && <button className="quiet-button" onClick={() => setConfirmLeave(true)}>Leave game</button>}<button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
+    <header className="app-header"><Brand /><div className="room-meta"><span className="eyebrow">{singlePlayer ? 'Single player' : 'Table'}</span>{!singlePlayer && <button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/games/${room.code}`)}>{room.code}</button>}</div><div className="header-actions"><HowToPlay />{singlePlayer && <button className="quiet-button" onClick={() => setConfirmLeave(true)}>Leave game</button>}<button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
     <div className="match-layout">
       <aside className="score-panel"><div className="score-heading"><div><span className="eyebrow">Match to 10</span><h1>Score</h1></div><span className="hand-count">Hand {game.handNumber}</span></div><FiveScore score={game.score[0]} team={0} isViewer={viewerTeam === 0} /><FiveScore score={game.score[1]} team={1} isViewer={viewerTeam === 1} /><div className="hand-status"><span>Tricks</span><strong>{game.tricks[viewerTeam]}–{game.tricks[opponentTeam]}</strong></div></aside>
       <main className="table-wrap"><section className="felt-table">
