@@ -8,10 +8,10 @@ export interface SensoryUIConfig {
   /** Master volume multiplier. Range: 0–1. */
   volume: number
   /**
-   * Sound pack name. Selects a built-in pack or falls back to "aero".
+   * Sound pack name. Selects a built-in application pack or falls back to "crisp".
    *
-   * Built-in packs: soft | aero (default) | arcade | organic | glass |
-   *                 industrial | minimal | retro | crisp
+   * Built-in application pack: crisp
+   * Custom theme strings remain source-compatible and fall back to crisp.
    *
    * Individual roles can still be overridden via `overrides` regardless
    * of which pack is active.
@@ -44,7 +44,7 @@ export interface SensoryUIConfig {
 export const defaultConfig: SensoryUIConfig = {
   enabled: true,
   volume: 0.35,
-  theme: 'aero',
+  theme: 'crisp',
   categories: {
     interaction: true,
     overlay: true,
@@ -56,7 +56,12 @@ export const defaultConfig: SensoryUIConfig = {
   reducedMotion: 'inherit',
 }
 
-export function mergeConfig(user: Partial<SensoryUIConfig>): SensoryUIConfig {
+export function mergeConfig(
+  user: Partial<Omit<SensoryUIConfig, 'categories' | 'overrides'>> & {
+    categories?: Partial<Record<SoundCategory, boolean>>
+    overrides?: Partial<Record<SoundRole, string>>
+  },
+): SensoryUIConfig {
   return {
     ...defaultConfig,
     ...user,
@@ -77,7 +82,7 @@ export function mergeConfig(user: Partial<SensoryUIConfig>): SensoryUIConfig {
  * Resolution priority:
  *   1. config.overrides[role]    - user-defined string override (URL or base64)
  *   2. packRegistry[theme][role] - synthesizer from the active sound pack
- *   3. packRegistry.aero[role]   - fallback to "aero" if theme name is unknown
+ *   3. packRegistry.crisp[role]  - fallback to "crisp" if theme name is unknown
  *   4. null                      - category disabled or role not found
  */
 export function resolveRole(role: SoundRole, config: SensoryUIConfig): SoundSource | null {
@@ -93,9 +98,9 @@ export function resolveRole(role: SoundRole, config: SensoryUIConfig): SoundSour
     return override
   }
 
-  // Look up the active pack, fall back to "aero" if pack name is unknown
+  // Look up the active pack, fall back to "crisp" if pack name is unknown
   const packName = config.theme as SoundPackName
-  const pack = packRegistry[packName] ?? packRegistry.aero
+  const pack = packRegistry[packName] ?? packRegistry.crisp
   const source = pack[role]
 
   return source ?? null

@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Effect } from 'effect'
 import { auth } from '../../../../lib/auth.server'
 import { GameService, GameServiceError, gameRuntime } from '../../../../server/game-service.server'
+import { createRoomEventPublisher } from '../../../../server/room-event-publisher.server'
 
 const activeStreams = new Map<string, symbol>()
 
@@ -50,6 +51,10 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
             }
             onCancel = cleanup
 
+            const roomPublisher = createRoomEventPublisher((frame) => {
+              controller.enqueue(encoder.encode(frame))
+            }, cleanup)
+
             const send = (event: string, data?: unknown) => {
               if (closed) {
                 return
@@ -81,7 +86,9 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
                     return yield* games.tick(userId, roomId)
                   }),
                 )
-                send('room', view)
+                if (!closed) {
+                  roomPublisher.publish(view)
+                }
               } catch (error) {
                 if (error instanceof GameServiceError && error.code === 'not-found') {
                   send('gone')

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from '@tanstack/react-router'
 import { AuthScreen } from './components/AuthScreen'
 import { GameTable } from './components/GameTable'
@@ -7,10 +7,12 @@ import { authClient } from './lib/auth-client'
 import {
   getCurrentPartyFn,
   getCurrentRoomFn,
+  getWaitingLobbyFn,
   joinPartyFn,
   joinRoomFn,
 } from './server/game.functions'
 import { acceptRoomUpdate, type PartyView, type RoomView } from './multiplayer'
+import { startWaitingLobbyPolling } from './waiting-lobby-polling'
 import './App.css'
 
 export default function App() {
@@ -34,15 +36,22 @@ export default function App() {
     },
     [navigate],
   )
+  const lobbyPollGenerationRef = useRef(0)
+  const setPartyState = useCallback((next: PartyView | null) => {
+    if (next === null) {
+      lobbyPollGenerationRef.current += 1
+    }
+    setParty(next)
+  }, [])
   const leaveRoom = useCallback(
     (leftParty = false) => {
       setRoom(null)
       if (leftParty) {
-        setParty(null)
+        setPartyState(null)
       }
       void navigate({ to: '/', replace: true })
     },
-    [navigate],
+    [navigate, setPartyState],
   )
 
   useEffect(() => {
@@ -55,7 +64,7 @@ export default function App() {
     const load = async () => {
       if (partnerInvite) {
         try {
-          setParty(await joinPartyFn({ data: { inviteCode: partnerInvite } }))
+          setPartyState(await joinPartyFn({ data: { inviteCode: partnerInvite } }))
         } catch {
           setLoadError('That partner invite is invalid or has already been used.')
         } finally {
@@ -70,7 +79,7 @@ export default function App() {
         updateRoom(roomResult.value)
       }
       if (partyResult.status === 'fulfilled') {
-        setParty(partyResult.value)
+        setPartyState(partyResult.value)
       }
       if (roomResult.status === 'rejected') {
         setLoadError(
@@ -83,27 +92,54 @@ export default function App() {
     void load().finally(() => {
       return setLoaded(true)
     })
-  }, [gameCode, loaded, location.pathname, navigate, session, updateRoom])
+  }, [gameCode, loaded, location.pathname, navigate, session, setPartyState, updateRoom])
+
+  const partyId = party?.id
+  const sessionUserId = session?.user.id
 
   useEffect(() => {
-    if (!party || room) {
+    if (!partyId || !sessionUserId || room) {
       return
     }
-    const refresh = () => {
-      return void Promise.all([getCurrentPartyFn(), getCurrentRoomFn()]).then(
-        ([nextParty, nextRoom]) => {
+    const generation = lobbyPollGenerationRef.current
+    const polling = startWaitingLobbyPolling({
+      load: () => {
+        return getWaitingLobbyFn()
+      },
+      apply: ({ party: nextParty, room: nextRoom }) => {
+        if (nextParty === null) {
+          setPartyState(null)
+        } else {
           setParty(nextParty)
-          if (nextRoom) {
-            updateRoom(nextRoom)
-          }
-        },
-      )
-    }
-    const timer = window.setInterval(refresh, 2_000)
+        }
+        if (nextRoom) {
+          updateRoom(nextRoom)
+        }
+      },
+      isCurrent: () => {
+        return lobbyPollGenerationRef.current === generation
+      },
+      getVisibilityState: () => {
+        return document.visibilityState
+      },
+      addVisibilityListener: (listener) => {
+        document.addEventListener('visibilitychange', listener)
+        return () => {
+          document.removeEventListener('visibilitychange', listener)
+        }
+      },
+      setTimeout: (callback, delayMs) => {
+        return globalThis.setTimeout(callback, delayMs)
+      },
+      clearTimeout: (timer) => {
+        globalThis.clearTimeout(timer)
+      },
+    })
     return () => {
-      return window.clearInterval(timer)
+      lobbyPollGenerationRef.current += 1
+      polling.stop()
     }
-  }, [party, room, updateRoom])
+  }, [partyId, room, sessionUserId, setPartyState, updateRoom])
 
   useEffect(() => {
     if (!roomId) {
@@ -123,7 +159,7 @@ export default function App() {
       })
       events.addEventListener('gone', () => {
         setRoom(null)
-        void getCurrentPartyFn().then(setParty)
+        void getCurrentPartyFn().then(setPartyState)
         void navigate({ to: '/', replace: true })
       })
     }, 100)
@@ -131,7 +167,7 @@ export default function App() {
       window.clearTimeout(timer)
       events?.close()
     }
-  }, [navigate, roomId])
+  }, [navigate, roomId, setPartyState])
 
   if (isPending) {
     return (
@@ -160,7 +196,7 @@ export default function App() {
         party={party}
         initialError={loadError}
         onRoom={updateRoom}
-        onParty={setParty}
+        onParty={setPartyState}
         onLeave={leaveRoom}
         userId={session.user.id}
         userName={session.user.name}

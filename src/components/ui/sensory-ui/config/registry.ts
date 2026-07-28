@@ -1,20 +1,6 @@
 import type { SoundRole } from './sound-roles'
 import type { SoundSource } from './engine'
-import {
-  softPack,
-  aeroPack,
-  arcadePack,
-  organicPack,
-  glassPack,
-  industrialPack,
-  minimalPack,
-  retroPack,
-  crispPack,
-  type SoundPackName,
-} from '../sounds/packs'
-
-// Re-export so consumers can import SoundPackName from this module
-export type { SoundPackName }
+import { crispPack } from '../sounds/crisp-pack'
 
 /**
  * A complete mapping of every SoundRole to a SoundSource for one pack.
@@ -23,35 +9,22 @@ export type { SoundPackName }
  */
 export type SoundPack = Record<SoundRole, SoundSource>
 
-// ---------------------------------------------------------------------------
-// Pack registry - maps pack name → full SoundPack
-// ---------------------------------------------------------------------------
-
 /**
- * All built-in sound packs, keyed by their `SoundPackName`.
- *
- * The engine uses this via `config.theme` to resolve a role to
- * its audio source before playback.
+ * Application-facing built-in sound packs.
+ * Only the active crisp pack is shipped in the root client graph.
  */
-export const packRegistry: Record<SoundPackName, SoundPack> = {
-  soft: softPack,
-  aero: aeroPack,
-  arcade: arcadePack,
-  organic: organicPack,
-  glass: glassPack,
-  industrial: industrialPack,
-  minimal: minimalPack,
-  retro: retroPack,
+export const packRegistry = {
   crisp: crispPack,
-}
+} as const
+
+export type SoundPackName = keyof typeof packRegistry
 
 /**
- * Default sound pack name.
- * "aero" is the default - balanced, pleasant, professional.
+ * Default sound pack name for the application registry.
  */
-export const DEFAULT_PACK: SoundPackName = 'aero'
+export const DEFAULT_PACK: SoundPackName = 'crisp'
 
 /**
  * Backwards-compat alias: the default pack's role → source mapping.
  */
-export const roleRegistry: SoundPack = aeroPack
+export const roleRegistry: SoundPack = crispPack

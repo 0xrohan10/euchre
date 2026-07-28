@@ -182,6 +182,7 @@ export const roomSeat = pgTable(
     return [
       primaryKey({ columns: [table.roomId, table.seat] }),
       uniqueIndex('room_seat_room_user_idx').on(table.roomId, table.userId),
+      index('room_seat_user_id_idx').on(table.userId),
     ]
   },
 )

@@ -95,6 +95,16 @@ export const getCurrentRoomFn = createServerFn({ method: 'GET' })
     )
   })
 
+export const getWaitingLobbyFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(({ context }) => {
+    return gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        return games.waitingLobby(context.session.user.id)
+      }),
+    )
+  })
+
 export const getGameHistoryFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(({ context }) => {

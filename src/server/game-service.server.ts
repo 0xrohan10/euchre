@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, ManagedRuntime } from 'effect'
 import { db } from '../db/index.server'
 import {
@@ -31,6 +31,7 @@ import {
   type RoomView,
   type SeatView,
 } from '../multiplayer'
+import { evaluateTickPolicy } from './tick-policy'
 
 export class GameServiceError extends Data.TaggedError('GameServiceError')<{
   readonly code: 'not-found' | 'forbidden' | 'conflict' | 'invalid' | 'database'
@@ -56,6 +57,9 @@ type GameServiceShape = {
   leaveParty: (userId: string) => Effect.Effect<void, GameServiceError>
   startPartyRoom: (userId: string, rules: GameRules) => Effect.Effect<RoomView, GameServiceError>
   currentRoom: (userId: string) => Effect.Effect<RoomView | null, GameServiceError>
+  waitingLobby: (
+    userId: string,
+  ) => Effect.Effect<{ party: PartyView | null; room: RoomView | null }, GameServiceError>
   joinRoom: (userId: string, code: string) => Effect.Effect<RoomView, GameServiceError>
   leaveRoom: (userId: string, roomId: string) => Effect.Effect<void, GameServiceError>
   getRoom: (userId: string, roomId: string) => Effect.Effect<RoomView, GameServiceError>
@@ -337,7 +341,67 @@ const GameServiceLive = Layer.succeed(
     tick: Effect.fn('GameService.tick')((userId: string, roomId: string) => {
       return Effect.tryPromise({
         try: async () => {
+          const toPolicyInput = (
+            nowMs: number,
+            record: typeof room.$inferSelect,
+            seats: (typeof roomSeat.$inferSelect)[],
+          ) => {
+            return {
+              nowMs,
+              callerUserId: userId,
+              room: {
+                status: record.status,
+                updatedAtMs: record.updatedAt.getTime(),
+                gamePhase: record.game?.phase ?? null,
+                hostUserId: record.hostUserId,
+                activePlayerSeat: record.game?.activePlayer ?? null,
+              },
+              seats: seats.map((seat) => {
+                return {
+                  userId: seat.userId,
+                  seat: seat.seat,
+                  connected: seat.connected,
+                  controller: seat.controller,
+                  lastSeenAtMs: seat.lastSeenAt.getTime(),
+                }
+              }),
+            }
+          }
+
+          // REPEATABLE READ keeps room+seats+view on one snapshot without taking FOR UPDATE,
+          // so idle ticks stay consistent and still do not contend with command locks.
+          const preflight = await db.transaction(async (tx) => {
+            await tx.execute(sql`set local transaction isolation level repeatable read`)
+            const now = new Date()
+            const [preflightRoom] = await tx.select().from(room).where(eq(room.id, roomId)).limit(1)
+            if (!preflightRoom) {
+              throw new DomainError('not-found', 'Table not found.')
+            }
+            const preflightSeats = await tx
+              .select()
+              .from(roomSeat)
+              .where(eq(roomSeat.roomId, roomId))
+              .orderBy(roomSeat.seat)
+            const preflightCaller = preflightSeats.find((seat) => {
+              return seat.userId === userId
+            })
+            if (!preflightCaller) {
+              throw new DomainError('forbidden', 'You are not seated at this table.')
+            }
+            const preflightPolicy = evaluateTickPolicy(
+              toPolicyInput(now.getTime(), preflightRoom, preflightSeats),
+            )
+            if (!preflightPolicy.sharedMutationMayBeNeeded) {
+              return { kind: 'view' as const, view: await viewRoom(userId, roomId, tx) }
+            }
+            return { kind: 'mutate' as const }
+          })
+          if (preflight.kind === 'view') {
+            return preflight.view
+          }
+
           return db.transaction(async (tx) => {
+            const lockedNow = new Date()
             const [record] = await tx
               .select()
               .from(room)
@@ -358,12 +422,31 @@ const GameServiceLive = Layer.succeed(
             if (!caller) {
               throw new DomainError('forbidden', 'You are not seated at this table.')
             }
-            const callerReconnected = !caller.connected || caller.controller !== 'human'
-            const now = new Date()
-            await tx
-              .update(roomSeat)
-              .set({ connected: true, controller: 'human', lastSeenAt: now })
-              .where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.userId, userId)))
+            const lockedPolicy = evaluateTickPolicy(
+              toPolicyInput(lockedNow.getTime(), record, seats),
+            )
+            if (!lockedPolicy.sharedMutationMayBeNeeded) {
+              return viewRoom(userId, roomId, tx)
+            }
+
+            const callerReconnected = lockedPolicy.reconnectWorkDue
+            let renewedSeats = seats
+            if (lockedPolicy.heartbeatWriteDue || callerReconnected) {
+              await tx
+                .update(roomSeat)
+                .set({ connected: true, controller: 'human', lastSeenAt: lockedNow })
+                .where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.userId, userId)))
+              renewedSeats = seats.map((seat) => {
+                return seat.userId === userId
+                  ? {
+                      ...seat,
+                      connected: true,
+                      controller: 'human' as const,
+                      lastSeenAt: lockedNow,
+                    }
+                  : seat
+              })
+            }
             if (callerReconnected) {
               await tx
                 .delete(disconnectVote)
@@ -374,17 +457,12 @@ const GameServiceLive = Layer.succeed(
                   ),
                 )
             }
-            const renewedSeats = seats.map((seat) => {
-              return seat.userId === userId
-                ? { ...seat, connected: true, controller: 'human' as const, lastSeenAt: now }
-                : seat
-            })
             const staleSeats = renewedSeats.filter((seat) => {
               return (
                 seat.userId !== userId &&
                 seat.connected &&
                 seat.controller === 'human' &&
-                now.getTime() - seat.lastSeenAt.getTime() >= 15_000
+                lockedNow.getTime() - seat.lastSeenAt.getTime() >= 15_000
               )
             })
             if (staleSeats.length > 0) {
@@ -419,11 +497,16 @@ const GameServiceLive = Layer.succeed(
             // Presence/status-only changes must not bump `version` — that field is the CAS
             // token for game commands. Bumping it on reconnect makes every in-flight play fail.
             // Clients still accept same-version presence updates.
-            if (callerReconnected || staleSeats.length > 0 || status !== record.status) {
-              await tx.update(room).set({ status, updatedAt: now }).where(eq(room.id, roomId))
+            if (
+              callerReconnected ||
+              staleSeats.length > 0 ||
+              status !== record.status ||
+              lockedPolicy.statusRepairDue
+            ) {
+              await tx.update(room).set({ status, updatedAt: lockedNow }).where(eq(room.id, roomId))
             }
             if (staleSeats.length === 0 && record.game && status === 'playing') {
-              const elapsed = now.getTime() - record.updatedAt.getTime()
+              const elapsed = lockedNow.getTime() - record.updatedAt.getTime()
               const game =
                 record.game.phase === 'trick-complete'
                   ? elapsed >= 1_600
@@ -440,7 +523,7 @@ const GameServiceLive = Layer.succeed(
                     game,
                     status: statusForGame(game),
                     version: record.version + 1,
-                    updatedAt: now,
+                    updatedAt: lockedNow,
                   })
                   .where(eq(room.id, roomId))
               }
@@ -474,6 +557,27 @@ const GameServiceLive = Layer.succeed(
           return db.transaction((tx) => {
             return viewParty(userId, tx)
           })
+        },
+        catch: failure,
+      })
+    }),
+    waitingLobby: Effect.fn('GameService.waitingLobby')((userId: string) => {
+      return Effect.tryPromise({
+        try: async () => {
+          const partyView = await db.transaction((tx) => {
+            return viewParty(userId, tx)
+          })
+          const roomView = await db.transaction(async (tx) => {
+            const [seat] = await tx
+              .select({ roomId: roomSeat.roomId })
+              .from(roomSeat)
+              .innerJoin(room, eq(roomSeat.roomId, room.id))
+              .where(eq(roomSeat.userId, userId))
+              .orderBy(desc(room.updatedAt))
+              .limit(1)
+            return seat ? viewRoom(userId, seat.roomId, tx) : null
+          })
+          return { party: partyView, room: roomView }
         },
         catch: failure,
       })
