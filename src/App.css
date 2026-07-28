@@ -408,66 +408,12 @@
 .match-layout {
   display: grid;
   grid-template-columns: 204px minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-areas:
-    'score status'
-    'score table';
   min-height: calc(100dvh - 64px);
 }
 .score-panel {
-  grid-area: score;
   padding: 26px 20px;
   border-right: 1px solid var(--line);
   background: var(--panel);
-}
-.match-status {
-  grid-area: status;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-}
-.match-status-badge {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: hsl(190 30% 88% / 0.08);
-  color: var(--text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.match-status.is-active .match-status-badge {
-  background: hsl(196.9 94% 60% / 0.14);
-  color: var(--accent);
-  box-shadow: inset 0 0 0 1px hsl(196.9 94% 60% / 0.28);
-}
-.match-status.is-paused .match-status-badge {
-  background: hsl(38 90% 55% / 0.14);
-  color: hsl(38 90% 68%);
-  box-shadow: inset 0 0 0 1px hsl(38 90% 55% / 0.28);
-}
-.match-status-detail {
-  margin: 0;
-  min-width: 0;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 520;
-  line-height: 1.35;
-  letter-spacing: -0.015em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .score-heading {
   display: flex;
@@ -659,7 +605,7 @@
 }
 
 .table-wrap {
-  grid-area: table;
+  position: relative;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -667,6 +613,20 @@
   place-items: center;
   padding: 14px 18px;
   overflow: hidden;
+}
+.game-error {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 5;
+  max-width: calc(100% - 36px);
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--danger);
+  font-size: 13px;
+  transform: translateX(-50%);
 }
 .felt-table {
   position: relative;
@@ -712,14 +672,62 @@
 .seat-west {
   left: 26px;
   top: 48%;
-  flex-direction: row;
+  flex-direction: column;
+  gap: 9px;
   transform: translateY(-50%);
 }
 .seat-east {
   right: 26px;
   top: 48%;
-  flex-direction: row-reverse;
+  flex-direction: column;
+  gap: 9px;
   transform: translateY(-50%);
+}
+.player-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.seat-west .player-identity,
+.seat-east .player-identity {
+  flex-direction: column;
+  gap: 14px;
+}
+.trick-pile {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.trick-pile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.trick-stack {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 27px;
+  flex: none;
+}
+.trick-pile-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 25px;
+  border-radius: 2px;
+  box-shadow:
+    0 1px 2px hsl(var(--shadow-color) / 0.35),
+    0 0 0 1px hsl(196 80% 80% / 0.12);
+  object-fit: cover;
+  pointer-events: none;
+  transform: translate(calc(var(--stack-index, 0) * 1px), calc(var(--stack-index, 0) * -1px));
 }
 .player-badge {
   position: relative;
@@ -1059,6 +1067,9 @@ button.playing-card.playable:active {
 }
 .player-console.has-controls {
   grid-template-columns: auto auto;
+}
+.player-console .player-identity {
+  min-width: 0;
 }
 .player-console .player-badge {
   min-width: 142px;
@@ -1504,6 +1515,39 @@ button.playing-card.playable:active {
   line-height: 1.5;
   text-wrap: pretty;
 }
+.won-tricks-panel {
+  max-height: min(72vh, 560px);
+  overflow: auto;
+}
+.won-tricks-list {
+  display: grid;
+  gap: 14px;
+  padding: 4px 2px 2px;
+}
+.won-trick-row {
+  display: grid;
+  gap: 8px;
+}
+.won-trick-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.won-trick-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.won-trick-cards .playing-card {
+  width: 64px;
+}
+.won-trick-unavailable {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
 .result-actions .primary-button {
   min-width: 116px;
 }
@@ -1589,9 +1633,6 @@ button.playing-card.playable:active {
   .hand-count {
     font-size: 11px;
   }
-  .match-status-detail {
-    font-size: 13px;
-  }
 }
 
 @media (min-width: 1024px) {
@@ -1642,15 +1683,8 @@ button.playing-card.playable:active {
   }
   .match-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr);
-    grid-template-areas:
-      'score'
-      'status'
-      'table';
+    grid-template-rows: auto minmax(0, 1fr);
     min-height: calc(100dvh - 60px);
-  }
-  .match-status {
-    padding: 8px 14px;
   }
   .score-panel {
     display: grid;
@@ -1724,10 +1758,6 @@ button.playing-card.playable:active {
   .seat-east {
     right: 15px;
     top: 45%;
-  }
-  .seat-west,
-  .seat-east {
-    flex-direction: column;
   }
   .seat-west .player-copy,
   .seat-east .player-copy {

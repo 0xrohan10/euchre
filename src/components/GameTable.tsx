@@ -8,6 +8,7 @@ import {
   optimisticRoomAction,
   playerAt,
   relativePlayer,
+  type GameView,
   type RoomView,
 } from '../multiplayer'
 import {
@@ -28,6 +29,13 @@ import { HowToPlay } from './HowToPlay'
 import { PlayerBadge } from './PlayerBadge'
 import { SEAT_ORDER, seatsByNumber } from './seats'
 import { SUIT_SYMBOL } from './suit-symbol'
+import { TrickPile } from './TrickPile'
+import { WonTricksDialog } from './WonTricksDialog'
+
+function collectedTrickCount(game: GameView, player: Player) {
+  const faceUpWinner = game.phase === 'trick-complete' ? game.lastTrickWinner : null
+  return game.playerTricks[player] - Number(faceUpWinner === player)
+}
 
 export function GameTable({
   room,
@@ -42,6 +50,7 @@ export function GameTable({
   const [error, setError] = useState('')
   const [alone, setAlone] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
+  const [viewingTricks, setViewingTricks] = useState<Player | null>(null)
   const game = room.game!
   const partyGame = room.partyId !== null
   const singlePlayer =
@@ -238,24 +247,6 @@ export function GameTable({
   const exchangeRestricted =
     game.exchangedPlayer === viewer &&
     !(game.phase === 'calling' && game.rules.stickDealer && viewer === game.dealer)
-  const matchStatus = (
-    <div
-      className={
-        room.status === 'paused'
-          ? 'match-status is-paused'
-          : isTurn
-            ? 'match-status is-active'
-            : 'match-status'
-      }
-      aria-live="polite"
-    >
-      <span className="match-status-badge">
-        <i className={isTurn ? 'status-light your-turn' : 'status-light'} aria-hidden="true" />
-        {room.status === 'paused' ? 'Game paused' : isTurn ? 'Your turn' : 'At the table'}
-      </span>
-      <p className="match-status-detail">{error || game.notice}</p>
-    </div>
-  )
   const bidControls = controls && (
     <div className="bid-controls">
       {game.phase === 'exchanging' ? (
@@ -289,7 +280,7 @@ export function GameTable({
               return void act({ type: 'order-up', alone })
             }}
           >
-            Order up
+            {viewer === game.dealer ? 'Pick up' : 'Order up'}
           </button>
           <button
             className="quiet-button"
@@ -418,8 +409,12 @@ export function GameTable({
             </strong>
           </div>
         </aside>
-        {matchStatus}
         <main className="table-wrap">
+          {error && (
+            <p className="game-error" role="alert">
+              {error}
+            </p>
+          )}
           <section className="felt-table">
             {farmerExchange && (
               <FarmerExchange cards={farmerExchange.cards} player={farmerExchange.player} />
@@ -428,15 +423,23 @@ export function GameTable({
               const player = playerAt(viewer, relative)
               const occupant = seats.get(player)
               const position = ['south', 'west', 'north', 'east'][relative]
-              const badge = (
-                <PlayerBadge
-                  occupant={occupant}
-                  active={game.activePlayer === player}
-                  dealer={game.dealer === player}
-                  maker={game.maker === player}
-                  lone={game.lonePlayer === player}
-                  tricks={game.playerTricks[player]}
-                />
+              const identity = (
+                <div className="player-identity">
+                  <PlayerBadge
+                    occupant={occupant}
+                    active={game.activePlayer === player}
+                    dealer={game.dealer === player}
+                    maker={game.maker === player}
+                    lone={game.lonePlayer === player}
+                  />
+                  <TrickPile
+                    trickCount={collectedTrickCount(game, player)}
+                    tricks={game.wonTricks[player]}
+                    onOpen={() => {
+                      setViewingTricks(player)
+                    }}
+                  />
+                </div>
               )
               return (
                 <div className={`seat seat-${position}`} key={player}>
@@ -469,13 +472,18 @@ export function GameTable({
                         </div>
                       </div>
                       <div className={`player-console ${controls ? 'has-controls' : ''}`}>
-                        {badge}
+                        {identity}
                         {bidControls}
                       </div>
                     </>
+                  ) : relative === 1 || relative === 3 ? (
+                    <>
+                      <HiddenHand count={game.handCounts[player]} />
+                      {identity}
+                    </>
                   ) : (
                     <>
-                      {badge}
+                      {identity}
                       <HiddenHand count={game.handCounts[player]} />
                     </>
                   )}
@@ -580,6 +588,16 @@ export function GameTable({
           </section>
         </main>
       </div>
+      {viewingTricks !== null && (
+        <WonTricksDialog
+          name={seats.get(viewingTricks)?.name ?? `Player ${viewingTricks + 1}`}
+          trickCount={collectedTrickCount(game, viewingTricks)}
+          tricks={game.wonTricks[viewingTricks]}
+          onClose={() => {
+            setViewingTricks(null)
+          }}
+        />
+      )}
       {room.disconnectVote && (
         <div className="settings-scrim">
           <section className="settings-panel">

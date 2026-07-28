@@ -73,6 +73,7 @@ describe('Euchre rules', () => {
       trick: [{ player: 3, card: card('A', 'clubs') }],
       tricks: [0, 0],
       playerTricks: [0, 0, 0, 0],
+      wonTricks: [[], [], [], []],
       score: [0, 0],
       handNumber: 1,
       lastTrickWinner: null,
@@ -397,6 +398,7 @@ describe('Euchre rules', () => {
       ],
       tricks: [2, 2],
       playerTricks: [1, 1, 1, 1],
+      wonTricks: [[], [], [], []],
       score: [0, 0],
       handNumber: 1,
       lastTrickWinner: null,
@@ -408,9 +410,12 @@ describe('Euchre rules', () => {
     expect(completedTrick.phase).toBe('trick-complete')
     expect(completedTrick.trick).toHaveLength(4)
     expect(completedTrick.playerTricks).toEqual([1, 1, 1, 2])
+    expect(completedTrick.wonTricks).toEqual([[], [], [], []])
 
     const result = reduceGame(completedTrick, { type: 'collect-trick' })
     expect(result.phase).toBe('hand-over')
     expect(result.score).toEqual([0, 2])
+    expect(result.wonTricks[3]).toHaveLength(1)
+    expect(result.wonTricks[3][0]).toHaveLength(4)
   })
 })

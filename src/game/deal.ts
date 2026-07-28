@@ -1,7 +1,7 @@
 import { type Card, type Rank, createDeck, shuffle } from './card'
 import { type Player, next } from './player'
 import { type GameRules, DEFAULT_RULES } from './rules'
-import type { GameState } from './state'
+import { emptyWonTricks, type GameState } from './state'
 
 export function farmersHandRank(hand: readonly Card[]): Extract<Rank, '9' | '10'> | null {
   if (
@@ -68,6 +68,7 @@ export function deal(
     trick: [],
     tricks: [0, 0],
     playerTricks: [0, 0, 0, 0],
+    wonTricks: emptyWonTricks(),
     score,
     handNumber,
     lastTrickWinner: null,

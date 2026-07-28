@@ -24,11 +24,16 @@ export type GameState = {
   trick: PlayedCard[]
   tricks: [number, number]
   playerTricks: [number, number, number, number]
+  wonTricks: [PlayedCard[][], PlayedCard[][], PlayedCard[][], PlayedCard[][]]
   score: [number, number]
   handNumber: number
   lastTrickWinner: Player | null
   notice: string
   rules: GameRules
+}
+
+export function emptyWonTricks(): GameState['wonTricks'] {
+  return [[], [], [], []]
 }
 
 export type GameAction =

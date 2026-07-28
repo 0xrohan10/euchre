@@ -148,6 +148,7 @@ export function Lobby({
                     occupant={lobbySeats?.get(seat)}
                     active={false}
                     dealer={false}
+                    showConnection
                   />
                 )
               })}

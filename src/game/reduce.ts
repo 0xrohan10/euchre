@@ -1,7 +1,7 @@
 import { SUITS, hasNaturalTrump, legalCards, trickWinner } from './card'
 import { createGame, deal, farmersHandRank } from './deal'
 import { next, nextActive, teamOf } from './player'
-import type { GameAction, GameState } from './state'
+import { emptyWonTricks, type GameAction, type GameState } from './state'
 
 function beginPlay(state: GameState): GameState {
   return {
@@ -51,7 +51,15 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
     return deal(next(state.dealer), state.score, state.handNumber + 1, state.rules)
   }
   if (action.type === 'collect-trick' && state.phase === 'trick-complete') {
-    const collected = { ...state, phase: 'playing' as const, trick: [] }
+    const winner = state.lastTrickWinner
+    const prior = state.wonTricks ?? emptyWonTricks()
+    const wonTricks =
+      winner === null
+        ? prior
+        : (prior.map((tricks, player) => {
+            return player === winner ? [...tricks, state.trick] : tricks
+          }) as GameState['wonTricks'])
+    const collected = { ...state, phase: 'playing' as const, trick: [], wonTricks }
     return state.tricks[0] + state.tricks[1] === 5 ? scoreHand(collected) : collected
   }
 

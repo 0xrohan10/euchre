@@ -6,14 +6,14 @@ export function PlayerBadge({
   dealer,
   maker = false,
   lone = false,
-  tricks,
+  showConnection = false,
 }: {
   occupant?: SeatView
   active: boolean
   dealer: boolean
   maker?: boolean
   lone?: boolean
-  tricks?: number
+  showConnection?: boolean
 }) {
   if (!occupant) {
     return (
@@ -26,17 +26,17 @@ export function PlayerBadge({
       </div>
     )
   }
-  const trickLabel = tricks === 1 ? '1 trick' : `${tricks ?? 0} tricks`
-  const status =
-    tricks === undefined
+  const status = showConnection
+    ? occupant.controller === 'bot'
+      ? 'Bot playing'
+      : occupant.connected
+        ? 'Connected'
+        : 'Disconnected'
+    : active
       ? occupant.controller === 'bot'
-        ? 'Bot playing'
-        : occupant.connected
-          ? 'Connected'
-          : 'Disconnected'
-      : active
-        ? `${occupant.controller === 'bot' ? 'Thinking' : 'Playing'} · ${trickLabel}`
-        : `${trickLabel} won`
+        ? 'Thinking'
+        : 'Playing'
+      : 'Waiting'
   return (
     <div className={`player-badge ${active ? 'active' : ''}`}>
       <span className={`avatar avatar-${occupant.seat}`}>

@@ -3,7 +3,7 @@ import type { Card } from './game/card'
 import type { Player } from './game/player'
 import { reduceGame } from './game/reduce'
 import type { GameRules } from './game/rules'
-import type { GameAction, GameState } from './game/state'
+import { emptyWonTricks, type GameAction, type GameState } from './game/state'
 
 export type RoomStatus = 'lobby' | 'playing' | 'paused' | 'finished'
 
@@ -68,6 +68,7 @@ export function projectGame(game: GameState, viewerSeat: Player): GameView {
   const { hands, kitty: _kitty, ...publicGame } = game
   return {
     ...publicGame,
+    wonTricks: game.wonTricks ?? emptyWonTricks(),
     hand: hands[viewerSeat],
     handCounts: hands.map((hand) => {
       return hand.length
