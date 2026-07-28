@@ -12,6 +12,7 @@ import {
   startPartyRoomFn,
 } from '../server/game.functions'
 import { Brand } from './Brand'
+import { HeaderMenu } from './HeaderMenu'
 import { HowToPlay } from './HowToPlay'
 import { PlayerBadge } from './PlayerBadge'
 import { RuleToggle } from './RuleToggle'
@@ -109,8 +110,8 @@ export function Lobby({
     <main className="lobby-shell">
       <header className="app-header">
         <Brand />
-        <div className="header-actions">
-          <span className="eyebrow">{userName}</span>
+        <HeaderMenu>
+          <span className="eyebrow header-user">{userName}</span>
           <HowToPlay />
           <button
             className="quiet-button"
@@ -122,7 +123,7 @@ export function Lobby({
           >
             Sign out
           </button>
-        </div>
+        </HeaderMenu>
       </header>
       <section className="lobby-card">
         {room ? (

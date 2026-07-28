@@ -22,6 +22,7 @@ import { Brand } from './Brand'
 import { CardFace } from './CardFace'
 import { FarmerExchange } from './FarmerExchange'
 import { FiveScore } from './FiveScore'
+import { HeaderMenu } from './HeaderMenu'
 import { HiddenHand } from './HiddenHand'
 import { HowToPlay } from './HowToPlay'
 import { PlayerBadge } from './PlayerBadge'
@@ -215,15 +216,22 @@ export function GameTable({
   const exchangeRestricted =
     game.exchangedPlayer === viewer &&
     !(game.phase === 'calling' && game.rules.stickDealer && viewer === game.dealer)
-  const handStatus = (
-    <div className="hand-turn-status">
-      <div className="hand-turn-label">
-        <i className={`status-light ${isTurn ? 'your-turn' : ''}`} />
-        <span className="eyebrow">
-          {room.status === 'paused' ? 'Game paused' : isTurn ? 'Your turn' : 'At the table'}
-        </span>
-      </div>
-      <strong>{error || game.notice}</strong>
+  const matchStatus = (
+    <div
+      className={
+        room.status === 'paused'
+          ? 'match-status is-paused'
+          : isTurn
+            ? 'match-status is-active'
+            : 'match-status'
+      }
+      aria-live="polite"
+    >
+      <span className="match-status-badge">
+        <i className={isTurn ? 'status-light your-turn' : 'status-light'} aria-hidden="true" />
+        {room.status === 'paused' ? 'Game paused' : isTurn ? 'Your turn' : 'At the table'}
+      </span>
+      <p className="match-status-detail">{error || game.notice}</p>
     </div>
   )
   const bidControls = controls && (
@@ -341,7 +349,7 @@ export function GameTable({
             </button>
           )}
         </div>
-        <div className="header-actions">
+        <HeaderMenu>
           <HowToPlay />
           {(singlePlayer || partyGame) && (
             <button
@@ -363,7 +371,7 @@ export function GameTable({
           >
             Sign out
           </button>
-        </div>
+        </HeaderMenu>
       </header>
       <div className="match-layout">
         <aside className="score-panel">
@@ -372,7 +380,12 @@ export function GameTable({
               <span className="eyebrow">Match to 10</span>
               <h1>Score</h1>
             </div>
-            <span className="hand-count">Hand {game.handNumber}</span>
+            <div className="score-heading-meta">
+              <span className="hand-count">Hand {game.handNumber}</span>
+              <span className="mobile-tricks">
+                Tricks {game.tricks[viewerTeam]}–{game.tricks[opponentTeam]}
+              </span>
+            </div>
           </div>
           <FiveScore score={game.score[0]} team={0} isViewer={viewerTeam === 0} />
           <FiveScore score={game.score[1]} team={1} isViewer={viewerTeam === 1} />
@@ -383,6 +396,7 @@ export function GameTable({
             </strong>
           </div>
         </aside>
+        {matchStatus}
         <main className="table-wrap">
           <section className="felt-table">
             {farmerExchange && (
@@ -407,7 +421,6 @@ export function GameTable({
                   {relative === 0 ? (
                     <>
                       <div className="hand-zone">
-                        {handStatus}
                         <div className="human-hand">
                           {hand.map((card) => {
                             const playable =
