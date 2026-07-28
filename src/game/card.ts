@@ -24,11 +24,22 @@ export function createDeck(): Card[] {
   })
 }
 
+function randomIndex(maxExclusive: number): number {
+  const random = new Uint32Array(1)
+  const limit = 0x1_0000_0000 - (0x1_0000_0000 % maxExclusive)
+  let value = 0
+  do {
+    crypto.getRandomValues(random)
+    value = random[0]!
+  } while (value >= limit)
+  return value % maxExclusive
+}
+
 export function shuffle<T>(items: readonly T[]): T[] {
   const shuffled = [...items]
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1))
-    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
+    const swapIndex = randomIndex(index + 1)
+    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex]!, shuffled[index]!]
   }
   return shuffled
 }

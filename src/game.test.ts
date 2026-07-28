@@ -4,6 +4,7 @@ import {
   createDeck,
   effectiveSuit,
   legalCards,
+  shuffle,
   sortHand,
   trickWinner,
   type Card,
@@ -86,6 +87,21 @@ describe('Euchre rules', () => {
     expect(game.hands.flat()).toHaveLength(20)
     expect(game.kitty).toHaveLength(4)
     expect(createDeck()).toHaveLength(24)
+  })
+
+  it('shuffles without losing or duplicating cards', () => {
+    const deck = createDeck()
+    const shuffled = shuffle(deck)
+    const shuffledIds = shuffled.map((card) => {
+      return card.id
+    })
+    const deckIds = deck.map((card) => {
+      return card.id
+    })
+    expect(shuffled).toHaveLength(deck.length)
+    expect(new Set(shuffledIds).size).toBe(deck.length)
+    expect([...shuffledIds].sort()).toEqual([...deckIds].sort())
+    expect(shuffled).not.toBe(deck)
   })
 
   it("exchanges the first eligible farmer's hand for the face-down kitty", () => {
