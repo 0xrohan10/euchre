@@ -53,6 +53,11 @@ export type RoomView = {
   rematch: RematchView | null
 }
 
+export type PendingRoomView = {
+  baseVersion: number
+  room: RoomView
+}
+
 export type PlayerAction = Extract<
   GameAction,
   | { type: 'exchange-kitty' }
@@ -117,6 +122,15 @@ export function acceptsRoomAction(
 
 export function acceptRoomUpdate(current: RoomView | null, next: RoomView): RoomView {
   return current && current.id === next.id && current.version > next.version ? current : next
+}
+
+export function roomViewWithPendingAction(
+  confirmed: RoomView,
+  pending: PendingRoomView | null,
+): RoomView {
+  return pending && pending.room.id === confirmed.id && confirmed.version <= pending.baseVersion
+    ? pending.room
+    : confirmed
 }
 
 export function optimisticRoomAction(room: RoomView, action: GameAction): RoomView {

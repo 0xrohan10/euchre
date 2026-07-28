@@ -8,7 +8,9 @@ import {
   optimisticRoomAction,
   playerAt,
   relativePlayer,
+  roomViewWithPendingAction,
   type GameView,
+  type PendingRoomView,
   type RoomView,
 } from '../multiplayer'
 import {
@@ -67,7 +69,7 @@ function resultCopy(game: GameView) {
 }
 
 export function GameTable({
-  room,
+  room: confirmedRoom,
   onRoom,
   onLeave,
 }: {
@@ -76,10 +78,12 @@ export function GameTable({
   onLeave: (leftParty?: boolean) => void
 }) {
   const [pending, setPending] = useState(false)
+  const [pendingRoom, setPendingRoom] = useState<PendingRoomView | null>(null)
   const [error, setError] = useState('')
   const [alone, setAlone] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const [viewingTricks, setViewingTricks] = useState<Player | null>(null)
+  const room = roomViewWithPendingAction(confirmedRoom, pendingRoom)
   const game = room.game!
   const partyGame = room.partyId !== null
   const singlePlayer =
@@ -179,7 +183,7 @@ export function GameTable({
     setPending(true)
     setError('')
     const base = roomRef.current
-    onRoom(optimisticRoomAction(base, action))
+    setPendingRoom({ baseVersion: base.version, room: optimisticRoomAction(base, action) })
     try {
       const submit = (version: number) => {
         return submitCommandFn({
@@ -204,8 +208,10 @@ export function GameTable({
         next = await submit(fresh.version)
       }
       onRoom(next)
+      setPendingRoom(null)
       setAlone(false)
     } catch (err) {
+      setPendingRoom(null)
       const message = err instanceof Error ? err.message : 'That action failed.'
       setError(
         /stale|version/i.test(message)

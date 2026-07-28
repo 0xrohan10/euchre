@@ -11,6 +11,7 @@ import {
   playerAt,
   projectGame,
   relativePlayer,
+  roomViewWithPendingAction,
   statusForGame,
   statusForPresence,
   type RoomView,
@@ -72,6 +73,30 @@ it('optimistically moves a played card from the hand to the trick', () => {
   expect(optimistic.game!.handCounts[0]).toBe(4)
   expect(optimistic.game!.trick.at(-1)).toEqual({ player: 0, card })
   expect(room.game!.hand).toContainEqual(card)
+})
+
+it('keeps an optimistic play visible through a same-version room update', () => {
+  const game = createGame(createDeck())
+  game.phase = 'playing'
+  game.activePlayer = 0
+  game.trump = 'clubs'
+  const room = {
+    id: 'room',
+    version: 4,
+    viewerSeat: 0,
+    game: projectGame(game, 0),
+  } as RoomView
+  const card = room.game!.hand[0]
+  const optimistic = optimisticRoomAction(room, { type: 'play', cardId: card.id })
+
+  const pending = { baseVersion: room.version, room: optimistic }
+  const afterStreamUpdate = roomViewWithPendingAction(room, pending)
+
+  expect(afterStreamUpdate.game!.hand).not.toContainEqual(card)
+  expect(afterStreamUpdate.game!.trick.at(-1)).toEqual({ player: 0, card })
+
+  const confirmed = { ...optimistic, version: room.version + 1 }
+  expect(roomViewWithPendingAction(confirmed, pending)).toBe(confirmed)
 })
 
 it('optimistically advances bidding with the shared game reducer', () => {
