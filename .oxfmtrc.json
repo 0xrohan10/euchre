@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "singleQuote": true,
+  "jsxSingleQuote": false,
+  "trailingComma": "all",
+  "arrowParens": "always",
+  "ignorePatterns": [
+    "dist/**",
+    ".wrangler/**",
+    "worker-configuration.d.ts",
+    "src/routeTree.gen.ts",
+    "src/db/migrations/**"
+  ]
+}
