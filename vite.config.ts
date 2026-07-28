@@ -14,6 +14,14 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, 'src'),
+        ...(mode === 'test'
+          ? {
+              'cloudflare:workers': path.resolve(
+                import.meta.dirname,
+                'src/test/cloudflare-workers.ts',
+              ),
+            }
+          : {}),
       },
     },
   }

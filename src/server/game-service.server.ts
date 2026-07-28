@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, ManagedRuntime } from 'effect'
-import { db } from '../db/index.server'
+import type { Database } from '../db/index.server'
 import {
   disconnectVote,
   gameHistory,
@@ -118,8 +118,8 @@ function randomCode(): string {
   }).join('')
 }
 
-type RoomReader = Pick<typeof db, 'select'>
-type HistoryWriter = Pick<typeof db, 'delete' | 'insert' | 'select' | 'update'>
+type RoomReader = Pick<Database, 'select'>
+type HistoryWriter = Pick<Database, 'delete' | 'insert' | 'select' | 'update'>
 type CompletedRoom = Pick<typeof room.$inferSelect, 'id' | 'matchId' | 'rules'>
 type CompletedGame = Pick<
   GameState,
@@ -197,7 +197,7 @@ async function recordCompletedMatch(
   record: CompletedRoom,
   game: CompletedGame,
   seats: HistorySeatInput[],
-  database: HistoryWriter = db,
+  database: HistoryWriter,
 ) {
   if (game.phase !== 'match-over') {
     return
@@ -423,7 +423,7 @@ async function reconcilePendingRating(database: HistoryWriter) {
   }
 }
 
-async function viewParty(userId: string, database: RoomReader = db): Promise<PartyView | null> {
+async function viewParty(userId: string, database: RoomReader): Promise<PartyView | null> {
   const [membership] = await database
     .select({ partyId: partyMember.partyId })
     .from(partyMember)
@@ -449,11 +449,7 @@ async function viewParty(userId: string, database: RoomReader = db): Promise<Par
   return { id: record.id, ownerUserId: record.ownerUserId, inviteCode: record.inviteCode, members }
 }
 
-async function viewRoom(
-  userId: string,
-  roomId: string,
-  database: RoomReader = db,
-): Promise<RoomView> {
+async function viewRoom(userId: string, roomId: string, database: RoomReader): Promise<RoomView> {
   const [record] = await database.select().from(room).where(eq(room.id, roomId)).limit(1)
   if (!record) {
     throw new DomainError('not-found', 'Table not found.')
@@ -606,8 +602,9 @@ async function viewRoomFromRows(
   }
 }
 
-const GameServiceLive = Layer.succeed(
-  GameService,
+// Keep the service definition flat so changes do not reindent this large module.
+const createGameService = (db: Database) =>
+  // oxlint-disable-next-line arrow-body-style
   GameService.of({
     history: Effect.fn('GameService.history')((userId: string) => {
       return Effect.tryPromise({
@@ -1814,7 +1811,8 @@ const GameServiceLive = Layer.succeed(
         })
       },
     ),
-  }),
-)
+  })
 
-export const gameRuntime = ManagedRuntime.make(GameServiceLive)
+export function createGameRuntime(database: Database) {
+  return ManagedRuntime.make(Layer.succeed(GameService, createGameService(database)))
+}

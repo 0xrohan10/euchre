@@ -6,7 +6,7 @@ import { room, roomSeat, user } from '../db/schema'
 import { DEFAULT_RULES } from '../game/rules'
 import { createGame } from '../game/deal'
 import { createDeck } from '../game/card'
-import { GameService, gameRuntime } from './game-service.server'
+import { createGameRuntime, GameService } from './game-service.server'
 import { Effect } from 'effect'
 
 const runIntegration = process.env.RUN_DB_INTEGRATION === '1'
@@ -23,6 +23,7 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     max: 2,
   })
   const db = drizzle({ client: admin })
+  const gameRuntime = createGameRuntime(db)
   const createdUserIds: string[] = []
   const createdRoomIds: string[] = []
 
@@ -36,6 +37,7 @@ describeIntegration('GameService.tick lock and race behavior', () => {
   })
 
   afterAll(async () => {
+    await gameRuntime.dispose()
     await admin.end()
   })
 

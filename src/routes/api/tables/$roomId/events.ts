@@ -1,7 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Effect } from 'effect'
-import { auth } from '../../../../lib/auth.server'
-import { GameService, GameServiceError, gameRuntime } from '../../../../server/game-service.server'
+import { createDb } from '../../../../db/index.server'
+import { createAuth } from '../../../../lib/auth.server'
+import {
+  createGameRuntime,
+  GameService,
+  GameServiceError,
+} from '../../../../server/game-service.server'
 import { createRoomEventPublisher } from '../../../../server/room-event-publisher.server'
 
 const activeStreams = new Map<string, symbol>()
@@ -11,6 +16,8 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
     handlers: {
       GET: async ({ request, params }) => {
         // Auth before the stream so we can 401 without hanging a Worker body.
+        const database = createDb()
+        const auth = createAuth(database)
         const session = await auth.api.getSession({ headers: request.headers })
         if (!session) {
           return new Response('Unauthorized', { status: 401 })
@@ -22,6 +29,7 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
         const streamKey = `${userId}:${roomId}:${streamId}`
         const streamToken = Symbol()
         const encoder = new TextEncoder()
+        const gameRuntime = createGameRuntime(database)
         let onCancel = () => {}
 
         const stream = new ReadableStream<Uint8Array>({
@@ -43,6 +51,7 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
               if (activeStreams.get(streamKey) === streamToken) {
                 activeStreams.delete(streamKey)
               }
+              void gameRuntime.dispose()
               try {
                 controller.close()
               } catch {
