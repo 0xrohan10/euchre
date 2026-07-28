@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import { chooseBotAction } from './game/bot'
 import {
-  DEFAULT_RULES,
-  chooseBotAction,
   createDeck,
-  createGame,
   effectiveSuit,
   legalCards,
-  reduceGame,
   sortHand,
   trickWinner,
   type Card,
-  type GameState,
-} from './game'
+} from './game/card'
+import { createGame } from './game/deal'
+import { reduceGame } from './game/reduce'
+import { DEFAULT_RULES } from './game/rules'
+import type { GameState } from './game/state'
 
 const card = (rank: Card['rank'], suit: Card['suit']): Card => {
   return {

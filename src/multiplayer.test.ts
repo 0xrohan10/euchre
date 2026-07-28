@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
-import { createDeck, createGame } from './game'
+import { createDeck } from './game/card'
+import { createGame } from './game/deal'
 import {
   acceptRoomUpdate,
   acceptsRoomAction,

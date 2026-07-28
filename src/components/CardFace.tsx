@@ -1,5 +1,5 @@
 import { cardImage } from '../card-assets'
-import type { Card } from '../game'
+import type { Card } from '../game/card'
 
 export function CardFace({
   card,

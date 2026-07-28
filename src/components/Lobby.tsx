@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { authClient } from '../lib/auth-client'
-import type { GameRules } from '../game'
+import type { GameRules } from '../game/rules'
 import type { PartyView, RoomView } from '../multiplayer'
 import {
   createPartyFn,

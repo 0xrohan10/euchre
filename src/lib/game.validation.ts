@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { SUITS } from '../game'
+import { SUITS } from '../game/card'
 
 const NonEmptyText = Schema.NonEmptyString
 

@@ -25,7 +25,7 @@ import nineClubs from 'cardsJS/cards/9C.svg'
 import nineDiamonds from 'cardsJS/cards/9D.svg'
 import nineHearts from 'cardsJS/cards/9H.svg'
 import nineSpades from 'cardsJS/cards/9S.svg'
-import type { Card, Rank, Suit } from './game'
+import type { Card, Rank, Suit } from './game/card'
 
 const cardImages: Record<Rank, Record<Suit, string>> = {
   '9': { clubs: nineClubs, diamonds: nineDiamonds, hearts: nineHearts, spades: nineSpades },

@@ -13,7 +13,8 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core'
-import type { GameAction, GameRules, GameState } from '../../game'
+import type { GameRules } from '../../game/rules'
+import type { GameAction, GameState } from '../../game/state'
 import { user } from './auth'
 
 export const roomStatus = pgEnum('room_status', ['lobby', 'playing', 'paused', 'finished'])

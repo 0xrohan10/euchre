@@ -1,12 +1,9 @@
-import {
-  chooseBotAction,
-  reduceGame,
-  type Card,
-  type GameAction,
-  type GameRules,
-  type GameState,
-  type Player,
-} from './game'
+import { chooseBotAction } from './game/bot'
+import type { Card } from './game/card'
+import type { Player } from './game/player'
+import { reduceGame } from './game/reduce'
+import type { GameRules } from './game/rules'
+import type { GameAction, GameState } from './game/state'
 
 export type RoomStatus = 'lobby' | 'playing' | 'paused' | 'finished'
 

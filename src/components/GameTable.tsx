@@ -1,15 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { authClient } from '../lib/auth-client'
-import {
-  hasNaturalTrump,
-  legalCards,
-  sortHand,
-  SUITS,
-  teamOf,
-  type Card,
-  type GameAction,
-  type Player,
-} from '../game'
+import { hasNaturalTrump, legalCards, sortHand, SUITS, type Card } from '../game/card'
+import { teamOf, type Player } from '../game/player'
+import type { GameAction } from '../game/state'
 import {
   canPassCalling,
   optimisticRoomAction,

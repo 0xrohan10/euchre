@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import { cardBackImage, cardImage } from '../card-assets'
-import type { Card, Player } from '../game'
+import type { Card } from '../game/card'
+import type { Player } from '../game/player'
 
 const SLOT_INDEXES = [0, 1, 2] as const
 

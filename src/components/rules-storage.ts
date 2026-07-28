@@ -1,4 +1,4 @@
-import { DEFAULT_RULES, type GameRules } from '../game'
+import { DEFAULT_RULES, type GameRules } from '../game/rules'
 
 export const RULES_STORAGE_KEY = 'kitty-rules:v1'
 

@@ -11,7 +11,11 @@ import {
   roomSeat,
   user,
 } from '../db/schema'
-import { createGame, reduceGame, type GameAction, type GameRules, type Player } from '../game'
+import { createGame } from '../game/deal'
+import type { Player } from '../game/player'
+import { reduceGame } from '../game/reduce'
+import type { GameRules } from '../game/rules'
+import type { GameAction } from '../game/state'
 import {
   acceptsRoomAction,
   advanceBot,
