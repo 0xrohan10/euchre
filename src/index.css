@@ -1,7 +1,11 @@
 @import url('https://rsms.me/inter/inter.css');
 
-/* Euchs brand palette */
-:root {
+/* Skip Preflight so existing global CSS keeps exact visuals */
+@import 'tailwindcss/theme' layer(theme);
+@import 'tailwindcss/utilities' layer(utilities);
+
+/* Brand palette → CSS vars + Tailwind color utilities */
+@theme {
   --color-ink-black-50: hsl(197.5 92.3% 94.9%);
   --color-ink-black-100: hsl(196.6 92.2% 90%);
   --color-ink-black-200: hsl(196.9 94.1% 80%);
@@ -61,6 +65,34 @@
   --color-beige-800: hsl(79.3 54.9% 20%);
   --color-beige-900: hsl(78.6 56.9% 10%);
   --color-beige-950: hsl(81 55.6% 7.1%);
+
+  --font-sans: Inter, system-ui, sans-serif;
+}
+
+/* App.css keeps --canvas etc.; expose as utilities without renaming */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-canvas-lift: var(--canvas-lift);
+  --color-chrome: var(--chrome);
+  --color-panel: var(--panel);
+  --color-panel-raised: var(--panel-raised);
+  --color-well: var(--well);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-glow: var(--accent-glow);
+  --color-felt: var(--felt);
+  --color-felt-deep: var(--felt-deep);
+  --color-card-face: var(--card-face);
+  --color-card-ink: var(--card-ink);
+  --color-card-red: var(--card-red);
+  --color-suit-red: var(--suit-red);
+  --color-danger: var(--danger);
 }
 
 /* Semantic tokens */
