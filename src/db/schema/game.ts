@@ -14,6 +14,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core'
 import type { GameRules } from '../../game/rules'
+import type { GameHistorySeat } from '../../game/history'
 import type { GameAction, GameState } from '../../game/state'
 import { user } from './auth'
 
@@ -89,6 +90,7 @@ export const room = pgTable(
       },
       { onDelete: 'set null' },
     ),
+    matchId: uuid('match_id').notNull().defaultRandom(),
     status: roomStatus('status').notNull().default('lobby'),
     version: bigint('version', { mode: 'number' }).notNull().default(0),
     rules: jsonb('rules').$type<GameRules>().notNull(),
@@ -100,6 +102,55 @@ export const room = pgTable(
     return [
       index('room_host_user_id_idx').on(table.hostUserId),
       index('room_party_id_idx').on(table.partyId),
+    ]
+  },
+)
+
+export const gameHistory = pgTable(
+  'game_history',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    sourceRoomId: uuid('source_room_id').notNull(),
+    sourceMatchId: uuid('source_match_id').notNull(),
+    score0: integer('score_0').notNull(),
+    score1: integer('score_1').notNull(),
+    handCount: integer('hand_count').notNull(),
+    rules: jsonb('rules').$type<GameRules>().notNull(),
+    seats: jsonb('seats').$type<GameHistorySeat[]>().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => {
+    return [
+      uniqueIndex('game_history_source_match_id_idx').on(table.sourceMatchId),
+      index('game_history_completed_at_idx').on(table.completedAt),
+    ]
+  },
+)
+
+export const gameHistoryParticipant = pgTable(
+  'game_history_participant',
+  {
+    gameHistoryId: uuid('game_history_id')
+      .notNull()
+      .references(
+        () => {
+          return gameHistory.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    userId: text('user_id')
+      .notNull()
+      .references(
+        () => {
+          return user.id
+        },
+        { onDelete: 'cascade' },
+      ),
+  },
+  (table) => {
+    return [
+      primaryKey({ columns: [table.gameHistoryId, table.userId] }),
+      index('game_history_participant_user_id_idx').on(table.userId),
     ]
   },
 )

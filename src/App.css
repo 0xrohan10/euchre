@@ -1157,13 +1157,127 @@ button.playing-card.playable:active {
 }
 .quiet-button {
   min-height: 48px;
+  display: inline-flex;
+  align-items: center;
   padding: 0 13px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   font-size: 14px;
+  text-decoration: none;
   cursor: pointer;
+}
+
+.history-shell {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 50% -20%, hsl(282.4 48.6% 18% / 0.72), transparent 48%), var(--page);
+}
+.history-page {
+  width: min(880px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 72px 0 96px;
+}
+.history-heading {
+  max-width: 520px;
+  margin-bottom: 36px;
+}
+.history-heading h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(38px, 6vw, 62px);
+  font-weight: 620;
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+.history-heading p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 16px;
+}
+.history-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.history-match {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+  align-items: center;
+  gap: 28px;
+  min-height: 126px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: var(--panel-raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 12px 32px hsl(var(--shadow-color) / 0.14);
+}
+.history-result,
+.history-teams {
+  display: grid;
+  gap: 5px;
+}
+.history-result strong {
+  font-size: 17px;
+  font-weight: 650;
+}
+.history-result > span:last-child,
+.history-teams span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.history-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.history-score span {
+  min-width: 1.1ch;
+  font-size: 42px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  text-align: center;
+}
+.history-score i {
+  color: var(--text-muted);
+  font-size: 18px;
+  font-style: normal;
+}
+.history-teams {
+  justify-self: end;
+  text-align: right;
+}
+.history-teams span:first-child::before,
+.history-teams span:last-child::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--color-strawberry-red-500);
+}
+.history-teams span:last-child::before {
+  background: var(--color-lilac-200);
+}
+.history-empty {
+  min-height: 220px;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.history-empty strong {
+  color: var(--text);
+  font-size: 18px;
 }
 .pass-button {
   min-width: 76px;
@@ -1910,8 +2024,35 @@ button.playing-card.playable:active {
 }
 
 @media (max-width: 639px) {
+  .history-shell .app-header,
   .lobby-shell .app-header {
     padding: 0 12px;
+  }
+  .history-page {
+    width: min(100% - 24px, 480px);
+    padding: 40px 0 64px;
+  }
+  .history-heading {
+    margin-bottom: 24px;
+  }
+  .history-match {
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    padding: 18px;
+  }
+  .history-score span {
+    font-size: 36px;
+  }
+  .history-teams {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr 1fr;
+    justify-self: stretch;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    text-align: left;
+  }
+  .history-teams span:last-child {
+    text-align: right;
   }
   .lobby-card {
     width: min(420px, calc(100% - 24px));

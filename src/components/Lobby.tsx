@@ -112,6 +112,9 @@ export function Lobby({
         <Brand />
         <HeaderMenu>
           <span className="eyebrow header-user">{userName}</span>
+          <a className="quiet-button" href="/history">
+            Game history
+          </a>
           <HowToPlay />
           <button
             className="quiet-button"

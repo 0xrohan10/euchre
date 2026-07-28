@@ -393,6 +393,9 @@ export function GameTable({
           )}
         </div>
         <HeaderMenu>
+          <a className="quiet-button" href="/history">
+            Game history
+          </a>
           <HowToPlay />
           {(singlePlayer || partyGame) && (
             <button

@@ -95,6 +95,16 @@ export const getCurrentRoomFn = createServerFn({ method: 'GET' })
     )
   })
 
+export const getGameHistoryFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(({ context }) => {
+    return gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        return games.history(context.session.user.id)
+      }),
+    )
+  })
+
 export const joinRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator(joinRoomInput)
