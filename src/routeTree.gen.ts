@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GamesCodeRouteImport } from './routes/games/$code'
+import { Route as PartnersCodeRouteImport } from './routes/partners/$code'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiTablesRoomIdEventsRouteImport } from './routes/api/tables/$roomId/events'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const GamesCodeRoute = GamesCodeRouteImport.update({
   id: '/games/$code',
   path: '/games/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PartnersCodeRoute = PartnersCodeRouteImport.update({
+  id: '/partners/$code',
+  path: '/partners/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -38,12 +44,14 @@ const ApiTablesRoomIdEventsRoute = ApiTablesRoomIdEventsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/games/$code': typeof GamesCodeRoute
+  '/partners/$code': typeof PartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/games/$code': typeof GamesCodeRoute
+  '/partners/$code': typeof PartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
@@ -51,18 +59,30 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/games/$code': typeof GamesCodeRoute
+  '/partners/$code': typeof PartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/games/$code' | '/api/auth/$' | '/api/tables/$roomId/events'
+  fullPaths:
+    | '/'
+    | '/games/$code'
+    | '/partners/$code'
+    | '/api/auth/$'
+    | '/api/tables/$roomId/events'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/games/$code' | '/api/auth/$' | '/api/tables/$roomId/events'
+  to:
+    | '/'
+    | '/games/$code'
+    | '/partners/$code'
+    | '/api/auth/$'
+    | '/api/tables/$roomId/events'
   id:
     | '__root__'
     | '/'
     | '/games/$code'
+    | '/partners/$code'
     | '/api/auth/$'
     | '/api/tables/$roomId/events'
   fileRoutesById: FileRoutesById
@@ -70,6 +90,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   GamesCodeRoute: typeof GamesCodeRoute
+  PartnersCodeRoute: typeof PartnersCodeRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiTablesRoomIdEventsRoute: typeof ApiTablesRoomIdEventsRoute
 }
@@ -88,6 +109,13 @@ declare module '@tanstack/react-router' {
       path: '/games/$code'
       fullPath: '/games/$code'
       preLoaderRoute: typeof GamesCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/partners/$code': {
+      id: '/partners/$code'
+      path: '/partners/$code'
+      fullPath: '/partners/$code'
+      preLoaderRoute: typeof PartnersCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -110,6 +138,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   GamesCodeRoute: GamesCodeRoute,
+  PartnersCodeRoute: PartnersCodeRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiTablesRoomIdEventsRoute: ApiTablesRoomIdEventsRoute,
 }

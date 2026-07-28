@@ -21,17 +21,31 @@ export type DisconnectVoteView = {
   requiredApprovals: number
 }
 
+export type PartyView = {
+  id: string
+  ownerUserId: string
+  inviteCode: string
+  members: { userId: string; name: string }[]
+}
+
+export type RematchView = {
+  confirmations: Player[]
+  requiredConfirmations: number
+}
+
 export type RoomView = {
   id: string
   code: string
   status: RoomStatus
   version: number
   hostUserId: string
+  partyId: string | null
   viewerSeat: Player
   rules: GameRules
   seats: SeatView[]
   game: GameView | null
   disconnectVote: DisconnectVoteView | null
+  rematch: RematchView | null
 }
 
 export type PlayerAction = Extract<GameAction,

@@ -5,17 +5,35 @@ import { user } from './auth'
 export const roomStatus = pgEnum('room_status', ['lobby', 'playing', 'paused', 'finished'])
 export const seatController = pgEnum('seat_controller', ['human', 'bot'])
 
+export const party = pgTable('party', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ownerUserId: text('owner_user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  inviteCode: uuid('invite_code').notNull().defaultRandom().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index('party_owner_user_id_idx').on(table.ownerUserId)])
+
+export const partyMember = pgTable('party_member', {
+  partyId: uuid('party_id').notNull().references(() => party.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.partyId, table.userId] }),
+  uniqueIndex('party_member_user_id_idx').on(table.userId),
+])
+
 export const room = pgTable('room', {
   id: uuid('id').defaultRandom().primaryKey(),
   code: varchar('code', { length: 6 }).notNull().unique(),
   hostUserId: text('host_user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  partyId: uuid('party_id').references(() => party.id, { onDelete: 'set null' }),
   status: roomStatus('status').notNull().default('lobby'),
   version: bigint('version', { mode: 'number' }).notNull().default(0),
   rules: jsonb('rules').$type<GameRules>().notNull(),
   game: jsonb('game').$type<GameState>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index('room_host_user_id_idx').on(table.hostUserId)])
+}, (table) => [index('room_host_user_id_idx').on(table.hostUserId), index('room_party_id_idx').on(table.partyId)])
 
 export const roomSeat = pgTable('room_seat', {
   roomId: uuid('room_id').notNull().references(() => room.id, { onDelete: 'cascade' }),
@@ -45,3 +63,9 @@ export const disconnectVote = pgTable('disconnect_vote', {
   approveBot: boolean('approve_bot').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.roomId, table.disconnectedSeat, table.voterUserId] })])
+
+export const rematchVote = pgTable('rematch_vote', {
+  roomId: uuid('room_id').notNull().references(() => room.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.roomId, table.userId] })])

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useLocation, useNavigate, useParams } from '@tanstack/react-router'
 import { authClient } from './lib/auth-client'
 import { cardBackImage, cardImage, scoreFiveImages } from './card-assets'
-import { createRoomFn, createSinglePlayerRoomFn, getCurrentRoomFn, getRoomFn, joinRoomFn, leaveRoomFn, submitCommandFn, voteForBotFn } from './server/game.functions'
+import { confirmRematchFn, createPartyFn, createRoomFn, createSinglePlayerRoomFn, getCurrentPartyFn, getCurrentRoomFn, getRoomFn, joinPartyFn, joinRoomFn, leavePartyFn, leaveRoomFn, startPartyRoomFn, submitCommandFn, voteForBotFn } from './server/game.functions'
 import { DEFAULT_RULES, hasNaturalTrump, legalCards, sortHand, SUITS, teamOf, type Card, type GameAction, type GameRules, type Player, type Suit } from './game'
-import { acceptRoomUpdate, canPassCalling, optimisticRoomAction, playerAt, relativePlayer, type RoomView, type SeatView } from './multiplayer'
+import { acceptRoomUpdate, canPassCalling, optimisticRoomAction, playerAt, relativePlayer, type PartyView, type RoomView, type SeatView } from './multiplayer'
 import './App.css'
 
 const SUIT_SYMBOL: Record<Suit, string> = { clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }
@@ -145,12 +145,12 @@ function RuleToggle({ checked, description, disabled, onChange, title }: { check
   </label>
 }
 
-function Lobby({ room, onRoom, onLeave, userName }: { room: RoomView | null; onRoom: (room: RoomView) => void; onLeave: () => void; userName: string }) {
+function Lobby({ room, party, initialError, onRoom, onParty, onLeave, userId, userName }: { room: RoomView | null; party: PartyView | null; initialError?: string; onRoom: (room: RoomView) => void; onParty: (party: PartyView | null) => void; onLeave: () => void; userId: string; userName: string }) {
   const [mode, setMode] = useState<'multiplayer' | null>(null)
-  const [setupMode, setSetupMode] = useState<'single-player' | 'multiplayer' | null>(null)
+  const [setupMode, setSetupMode] = useState<'single-player' | 'multiplayer' | 'partner' | null>(null)
   const [rules, setRules] = useState<GameRules>({ ...DEFAULT_RULES })
   const [code, setCode] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError ?? '')
   const [pending, setPending] = useState(false)
   useEffect(() => {
     try {
@@ -182,6 +182,20 @@ function Lobby({ room, onRoom, onLeave, userName }: { room: RoomView | null; onR
       setPending(false)
     }
   }
+  async function createPartnership() {
+    setPending(true)
+    setError('')
+    try { onParty(await createPartyFn()) } catch { setError('Could not create a partnership.') } finally { setPending(false) }
+  }
+  async function leavePartnership() {
+    setPending(true)
+    setError('')
+    try {
+      await leavePartyFn()
+      onParty(null)
+      setSetupMode(null)
+    } catch { setError('Could not leave this partnership.') } finally { setPending(false) }
+  }
   return <main className="lobby-shell">
     <header className="app-header"><Brand /><div className="header-actions"><span className="eyebrow">{userName}</span><HowToPlay /><button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
     <section className="lobby-card">
@@ -198,12 +212,20 @@ function Lobby({ room, onRoom, onLeave, userName }: { room: RoomView | null; onR
           <RuleToggle title="Partner-order loners" description="Allow going alone when ordering up your partner as dealer." checked={rules.allowAloneWhenOrderingPartner} disabled={pending} onChange={(enabled) => setRule('allowAloneWhenOrderingPartner', enabled)} />
           <RuleToggle title="Farmer's hand" description="Swap three 9s or three 10s for the face-down kitty, then pass unless stuck as dealer." checked={rules.allowFarmersHand} disabled={pending} onChange={(enabled) => setRule('allowFarmersHand', enabled)} />
         </div>
-        <button className="primary-button" disabled={pending} onClick={() => void run(() => setupMode === 'single-player' ? createSinglePlayerRoomFn({ data: { rules } }) : createRoomFn({ data: { rules } }))}>{pending ? 'Starting…' : setupMode === 'single-player' ? 'Start game' : 'Create table'}</button>
+        <button className="primary-button" disabled={pending} onClick={() => void run(() => setupMode === 'single-player' ? createSinglePlayerRoomFn({ data: { rules } }) : setupMode === 'partner' ? startPartyRoomFn({ data: { rules } }) : createRoomFn({ data: { rules } }))}>{pending ? 'Starting…' : setupMode === 'single-player' || setupMode === 'partner' ? 'Start game' : 'Create table'}</button>
         <button className="quiet-button" disabled={pending} onClick={() => setSetupMode(null)}>Back</button>
+      </> : party ? <>
+        <span className="eyebrow">Your partnership</span><h1>{party.members.length === 2 ? 'Your partner is ready.' : 'Invite your partner.'}</h1>
+        <div className="party-members">{party.members.map((member) => <div key={member.userId}><span className="avatar">{member.name.slice(0, 2).toUpperCase()}</span><span><strong>{member.name}</strong><small>{member.userId === party.ownerUserId ? 'Party creator' : 'Partner'}</small></span></div>)}</div>
+        {party.members.length === 1 && <><button className="room-code large" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/partners/${party.inviteCode}`)}>Copy partner invite</button><p>The link is single-use. Your partner will be asked to sign in before joining.</p></>}
+        {party.members.length === 2 && party.ownerUserId === userId && <button className="primary-button" disabled={pending} onClick={() => setSetupMode('partner')}>Play two bots</button>}
+        {party.members.length === 2 && party.ownerUserId !== userId && <p>Waiting for the party creator to start the match.</p>}
+        <button className="quiet-button" disabled={pending} onClick={() => void leavePartnership()}>{pending ? 'Leaving…' : 'Leave partnership'}</button>
       </> : mode === null ? <>
-        <span className="eyebrow">Choose a mode</span><h1>How do you want to play?</h1><p>Play a full match against three bots, or invite other players to your table.</p>
+        <span className="eyebrow">Choose a mode</span><h1>How do you want to play?</h1><p>Play against bots, team up with a partner, or invite four players to a table.</p>
         <div className="mode-options">
           <button className="mode-option" disabled={pending} onClick={() => setSetupMode('single-player')}><strong>Single player</strong><span>You and three bots</span></button>
+          <button className="mode-option" disabled={pending} onClick={() => void createPartnership()}><strong>Play with a partner</strong><span>Your duo against two bots</span></button>
           <button className="mode-option" onClick={() => setMode('multiplayer')}><strong>Multiplayer</strong><span>Four online players</span></button>
         </div>
       </> : <>
@@ -217,13 +239,14 @@ function Lobby({ room, onRoom, onLeave, userName }: { room: RoomView | null; onR
   </main>
 }
 
-function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: RoomView) => void; onLeave: () => void }) {
+function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: RoomView) => void; onLeave: (leftParty?: boolean) => void }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const [alone, setAlone] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const game = room.game!
-  const singlePlayer = room.seats.some((seat) => seat.userId === null)
+  const partyGame = room.partyId !== null
+  const singlePlayer = !partyGame && room.seats.some((seat) => seat.userId === null)
   const viewer = room.viewerSeat
   const viewerTeam = teamOf(viewer)
   const opponentTeam = (1 - viewerTeam) as 0 | 1
@@ -272,8 +295,9 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
     setPending(true)
     setError('')
     try {
-      await leaveRoomFn({ data: { roomId: room.id } })
-      onLeave()
+      if (partyGame) await leavePartyFn()
+      else await leaveRoomFn({ data: { roomId: room.id } })
+      onLeave(partyGame)
     } catch {
       setError('Could not leave this game.')
       setConfirmLeave(false)
@@ -282,13 +306,28 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
     }
   }
 
+  async function returnToParty() {
+    setPending(true)
+    setError('')
+    try {
+      await leaveRoomFn({ data: { roomId: room.id } })
+      onLeave(false)
+    } catch { setError('Could not return to the partnership lobby.') } finally { setPending(false) }
+  }
+
+  async function confirmRematch() {
+    setPending(true)
+    setError('')
+    try { onRoom(await confirmRematchFn({ data: { roomId: room.id } })) } catch { setError('Could not confirm the rematch.') } finally { setPending(false) }
+  }
+
   const controls = isTurn && (game.phase === 'exchanging' || game.phase === 'ordering' || game.phase === 'calling')
   const availableSuits = SUITS.filter((suit) => game.phase === 'calling' && suit !== game.upCard.suit && (!game.rules.requireNaturalTrump || hasNaturalTrump(game.hand, suit)))
   const exchangeRestricted = game.exchangedPlayer === viewer && !(game.phase === 'calling' && game.rules.stickDealer && viewer === game.dealer)
   const handStatus = <div className="hand-turn-status"><div className="hand-turn-label"><i className={`status-light ${isTurn ? 'your-turn' : ''}`} /><span className="eyebrow">{room.status === 'paused' ? 'Game paused' : isTurn ? 'Your turn' : 'At the table'}</span></div><strong>{error || game.notice}</strong></div>
   const bidControls = controls && <div className="bid-controls">{game.phase === 'exchanging' ? <><button className="primary-button" onClick={() => void act({ type: 'exchange-kitty' })}>Swap with kitty</button><button className="quiet-button" onClick={() => void act({ type: 'decline-exchange' })}>Keep hand</button></> : game.phase === 'ordering' ? <><button className="primary-button" disabled={exchangeRestricted || (game.rules.requireNaturalTrump && !hasNaturalTrump(game.hand, game.upCard.suit))} onClick={() => void act({ type: 'order-up', alone })}>Order up</button><button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button></> : <><div className="suit-buttons">{availableSuits.map((suit) => <button disabled={exchangeRestricted} className={suit === 'hearts' || suit === 'diamonds' ? 'red' : ''} key={suit} onClick={() => void act({ type: 'call-trump', suit, alone })} aria-label={`Call ${suit}`}>{SUIT_SYMBOL[suit]}</button>)}</div>{canPassCalling(game.rules.stickDealer, game.activePlayer === game.dealer, availableSuits.length) && <button className="quiet-button" onClick={() => void act({ type: 'pass' })}>Pass</button>}</>}{game.phase !== 'exchanging' && <label className="alone-toggle"><input type="checkbox" checked={alone} disabled={exchangeRestricted} onChange={(event) => setAlone(event.target.checked)} />Go alone</label>}</div>
   return <div className="game-shell">
-    <header className="app-header"><Brand /><div className="room-meta"><span className="eyebrow">{singlePlayer ? 'Single player' : 'Table'}</span>{!singlePlayer && <button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/games/${room.code}`)}>{room.code}</button>}</div><div className="header-actions"><HowToPlay />{singlePlayer && <button className="quiet-button" onClick={() => setConfirmLeave(true)}>Leave game</button>}<button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
+    <header className="app-header"><Brand /><div className="room-meta"><span className="eyebrow">{singlePlayer ? 'Single player' : partyGame ? 'Partners vs bots' : 'Table'}</span>{!singlePlayer && !partyGame && <button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/games/${room.code}`)}>{room.code}</button>}</div><div className="header-actions"><HowToPlay />{(singlePlayer || partyGame) && <button className="quiet-button" onClick={() => setConfirmLeave(true)}>{partyGame ? 'Leave partnership' : 'Leave game'}</button>}<button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
     <div className="match-layout">
       <aside className="score-panel"><div className="score-heading"><div><span className="eyebrow">Match to 10</span><h1>Score</h1></div><span className="hand-count">Hand {game.handNumber}</span></div><FiveScore score={game.score[0]} team={0} isViewer={viewerTeam === 0} /><FiveScore score={game.score[1]} team={1} isViewer={viewerTeam === 1} /><div className="hand-status"><span>Tricks</span><strong>{game.tricks[viewerTeam]}–{game.tricks[opponentTeam]}</strong></div></aside>
       <main className="table-wrap"><section className="felt-table">
@@ -305,38 +344,71 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
           })}</div></div><div className={`player-console ${controls ? 'has-controls' : ''}`}>{badge}{bidControls}</div></> : <>{badge}<HiddenHand count={game.handCounts[player]} /></>}</div>
         })}
         <div className="table-center">{game.trump && <div className={`trump-chip ${game.trump === 'hearts' || game.trump === 'diamonds' ? 'red' : ''}`}><span>{SUIT_SYMBOL[game.trump]}</span> trump</div>}<div className="trick-area">{game.trick.map((played) => <div key={played.card.id} className={`trick-card trick-player-${relativePlayer(played.player, viewer)}`}><CardFace card={played.card} /></div>)}{game.trick.length === 0 && (game.phase === 'exchanging' || game.phase === 'ordering') && <div className="up-card"><CardFace card={game.upCard} /></div>}</div></div>
-        {!room.disconnectVote && (game.phase === 'hand-over' || game.phase === 'match-over') && <div className="table-result-scrim"><section className="result-dialog" role="dialog" aria-modal="true" aria-labelledby="result-title"><span className="eyebrow">{game.phase === 'match-over' ? 'Match complete' : 'Hand complete'}</span><h2 id="result-title">{game.notice}</h2><div className="result-actions">{room.hostUserId === room.seats.find((seat) => seat.seat === viewer)?.userId ? <button type="button" className="primary-button" onClick={() => void act({ type: game.phase === 'hand-over' ? 'next-hand' : 'new-match' })}>{game.phase === 'hand-over' ? 'Next hand' : 'Play again'}</button> : <p>Waiting for the host to continue.</p>}</div></section></div>}
+        {!room.disconnectVote && (game.phase === 'hand-over' || game.phase === 'match-over') && <div className="table-result-scrim"><section className="result-dialog" role="dialog" aria-modal="true" aria-labelledby="result-title"><span className="eyebrow">{game.phase === 'match-over' ? 'Match complete' : 'Hand complete'}</span><h2 id="result-title">{game.notice}</h2><div className="result-actions">{game.phase === 'match-over' && room.rematch ? <>{room.seats.filter((seat) => seat.userId !== null).length === 2 ? <button type="button" className="primary-button" disabled={pending || room.rematch.confirmations.includes(viewer)} onClick={() => void confirmRematch()}>{room.rematch.confirmations.includes(viewer) ? 'Rematch confirmed' : 'Confirm rematch'}</button> : <p>Your partner left. Return to the lobby to invite someone new.</p>}<p>{room.rematch.confirmations.length} of {room.rematch.requiredConfirmations} confirmed</p><button type="button" className="quiet-button" disabled={pending} onClick={() => void returnToParty()}>Return to lobby</button></> : room.hostUserId === room.seats.find((seat) => seat.seat === viewer)?.userId ? <button type="button" className="primary-button" onClick={() => void act({ type: game.phase === 'hand-over' ? 'next-hand' : 'new-match' })}>{game.phase === 'hand-over' ? 'Next hand' : 'Play again'}</button> : <p>Waiting for the host to continue.</p>}</div></section></div>}
       </section>
       </main>
     </div>
     {room.disconnectVote && <div className="settings-scrim"><section className="settings-panel"><div className="settings-header"><div><span className="eyebrow">Unanimous decision</span><h2>{room.seats.find((seat) => seat.seat === room.disconnectVote?.disconnectedSeat)?.name} disconnected</h2></div></div><div className="settings-section"><p>Every connected human player must approve bot takeover. The player can reclaim their seat whenever they return.</p><button className="primary-button" onClick={() => void voteForBotFn({ data: { roomId: room.id, disconnectedSeat: room.disconnectVote!.disconnectedSeat, approve: true } }).then(onRoom)}>Approve bot takeover</button><button className="quiet-button" onClick={() => void voteForBotFn({ data: { roomId: room.id, disconnectedSeat: room.disconnectVote!.disconnectedSeat, approve: false } }).then(onRoom)}>Keep waiting</button><p>{room.disconnectVote.approvals.length} of {room.disconnectVote.requiredApprovals} approvals</p></div></section></div>}
-    {confirmLeave && <div className="settings-scrim"><section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="leave-game-title"><div className="settings-header"><div><span className="eyebrow">Single player</span><h2 id="leave-game-title">Leave this game?</h2></div></div><div className="settings-section"><p>This match will be abandoned and cannot be resumed.</p><div className="dialog-actions"><button className="quiet-button" disabled={pending} onClick={() => setConfirmLeave(false)}>Keep playing</button><button className="primary-button" disabled={pending} onClick={() => void leave()}>{pending ? 'Leaving…' : 'Leave game'}</button></div></div></section></div>}
+    {confirmLeave && <div className="settings-scrim"><section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="leave-game-title"><div className="settings-header"><div><span className="eyebrow">{partyGame ? 'Partnership' : 'Single player'}</span><h2 id="leave-game-title">{partyGame ? 'Leave your partnership?' : 'Leave this game?'}</h2></div></div><div className="settings-section"><p>{partyGame ? 'A bot will finish your seat. Your partner will become the party creator and can invite someone new.' : 'This match will be abandoned and cannot be resumed.'}</p><div className="dialog-actions"><button className="quiet-button" disabled={pending} onClick={() => setConfirmLeave(false)}>Keep playing</button><button className="primary-button" disabled={pending} onClick={() => void leave()}>{pending ? 'Leaving…' : partyGame ? 'Leave partnership' : 'Leave game'}</button></div></div></section></div>}
   </div>
 }
 
 export default function App() {
   const { data: session, isPending } = authClient.useSession()
   const navigate = useNavigate()
+  const location = useLocation()
   const { code: gameCode } = useParams({ strict: false })
   const [room, setRoom] = useState<RoomView | null>(null)
+  const [party, setParty] = useState<PartyView | null>(null)
+  const [loadError, setLoadError] = useState('')
   const [loaded, setLoaded] = useState(false)
   const roomId = room?.id
   const updateRoom = useCallback((next: RoomView) => {
     setRoom((current) => acceptRoomUpdate(current, next))
     if (window.location.pathname !== `/games/${next.code}`) void navigate({ to: '/games/$code', params: { code: next.code }, replace: true })
   }, [navigate])
-  const leaveRoom = () => {
+  const leaveRoom = (leftParty = false) => {
     setRoom(null)
+    if (leftParty) setParty(null)
     void navigate({ to: '/', replace: true })
   }
 
   useEffect(() => {
     if (!session || loaded) return
     const legacyInvite = new URLSearchParams(window.location.search).get('room')
-    const code = gameCode ?? legacyInvite
-    const load = code ? joinRoomFn({ data: { code } }) : getCurrentRoomFn()
-    void load.then((next) => next && updateRoom(next)).finally(() => setLoaded(true))
-  }, [gameCode, loaded, session, updateRoom])
+    const partnerInvite = location.pathname.startsWith('/partners/') ? gameCode : undefined
+    const tableInvite = location.pathname.startsWith('/games/') ? gameCode : legacyInvite
+    const load = async () => {
+      if (partnerInvite) {
+        try {
+          setParty(await joinPartyFn({ data: { inviteCode: partnerInvite } }))
+        } catch {
+          setLoadError('That partner invite is invalid or has already been used.')
+        } finally {
+          await navigate({ to: '/', replace: true })
+        }
+      }
+      const [roomResult, partyResult] = await Promise.allSettled([
+        tableInvite ? joinRoomFn({ data: { code: tableInvite } }) : getCurrentRoomFn(),
+        getCurrentPartyFn(),
+      ])
+      if (roomResult.status === 'fulfilled' && roomResult.value) updateRoom(roomResult.value)
+      if (partyResult.status === 'fulfilled') setParty(partyResult.value)
+      if (roomResult.status === 'rejected') setLoadError(tableInvite ? 'Could not join that table.' : 'Could not load your current game.')
+      else if (partyResult.status === 'rejected') setLoadError('Could not load your partnership.')
+    }
+    void load().finally(() => setLoaded(true))
+  }, [gameCode, loaded, location.pathname, navigate, session, updateRoom])
+
+  useEffect(() => {
+    if (!party || room) return
+    const refresh = () => void Promise.all([getCurrentPartyFn(), getCurrentRoomFn()]).then(([nextParty, nextRoom]) => {
+      setParty(nextParty)
+      if (nextRoom) updateRoom(nextRoom)
+    })
+    const timer = window.setInterval(refresh, 2_000)
+    return () => window.clearInterval(timer)
+  }, [party, room, updateRoom])
 
   useEffect(() => {
     if (!roomId) return
@@ -345,12 +417,17 @@ export default function App() {
       const next = JSON.parse((event as MessageEvent<string>).data) as RoomView
       setRoom((current) => acceptRoomUpdate(current, next))
     })
+    events.addEventListener('gone', () => {
+      setRoom(null)
+      void getCurrentPartyFn().then(setParty)
+      void navigate({ to: '/', replace: true })
+    })
     return () => events.close()
-  }, [roomId])
+  }, [navigate, roomId])
 
   if (isPending) return <main className="auth-shell"><span className="eyebrow">Loading table…</span></main>
   if (!session) return <AuthScreen />
   if (!loaded) return <main className="auth-shell"><span className="eyebrow">Finding your seat…</span></main>
-  if (!room || room.status === 'lobby' || !room.game) return <Lobby room={room} onRoom={updateRoom} onLeave={leaveRoom} userName={session.user.name} />
+  if (!room || room.status === 'lobby' || !room.game) return <Lobby room={room} party={party} initialError={loadError} onRoom={updateRoom} onParty={setParty} onLeave={() => leaveRoom()} userId={session.user.id} userName={session.user.name} />
   return <GameTable room={room} onRoom={updateRoom} onLeave={leaveRoom} />
 }

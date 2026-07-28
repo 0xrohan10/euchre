@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Effect } from 'effect'
 import { auth } from '../../../../lib/auth.server'
-import { GameService, gameRuntime } from '../../../../server/game-service.server'
+import { GameService, GameServiceError, gameRuntime } from '../../../../server/game-service.server'
 
 export const Route = createFileRoute('/api/tables/$roomId/events')({
   server: {
@@ -16,7 +16,12 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
         try {
           await presence
         } catch {
-          return new Response('Table not found', { status: 404 })
+          return new Response('event: gone\ndata: {}\n\n', {
+            headers: {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache, no-transform',
+            },
+          })
         }
 
         const encoder = new TextEncoder()
@@ -48,7 +53,13 @@ export const Route = createFileRoute('/api/tables/$roomId/events')({
                 }
                 heartbeat += 1
                 if (heartbeat % 15 === 0) controller.enqueue(encoder.encode(': heartbeat\n\n'))
-              } catch {
+              } catch (error) {
+                if (error instanceof GameServiceError && (error.code === 'not-found' || error.code === 'forbidden')) {
+                  controller.enqueue(encoder.encode('event: gone\ndata: {}\n\n'))
+                  close()
+                  controller.close()
+                  return
+                }
                 try {
                   if (!closed) controller.enqueue(encoder.encode('event: error\ndata: {}\n\n'))
                 } catch {

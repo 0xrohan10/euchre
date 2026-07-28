@@ -63,6 +63,28 @@ export const createSinglePlayerRoomFn = createServerFn({ method: 'POST' })
   .validator(rulesInput)
   .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createSinglePlayerRoom(context.session.user.id, data))))
 
+export const getCurrentPartyFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.currentParty(context.session.user.id))))
+
+export const createPartyFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.createParty(context.session.user.id))))
+
+export const joinPartyFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((value: unknown) => ({ inviteCode: text(object(value).inviteCode, 'partner invite') }))
+  .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.joinParty(context.session.user.id, data.inviteCode))))
+
+export const leavePartyFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.leaveParty(context.session.user.id))))
+
+export const startPartyRoomFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator(rulesInput)
+  .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.startPartyRoom(context.session.user.id, data))))
+
 export const getCurrentRoomFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(({ context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.currentRoom(context.session.user.id))))
@@ -106,3 +128,8 @@ export const voteForBotFn = createServerFn({ method: 'POST' })
     return { roomId: text(input.roomId, 'room ID'), disconnectedSeat: input.disconnectedSeat as 0 | 1 | 2 | 3, approve: input.approve }
   })
   .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.voteForBot(context.session.user.id, data.roomId, data.disconnectedSeat, data.approve))))
+
+export const confirmRematchFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator(roomIdInput)
+  .handler(({ data, context }) => gameRuntime.runPromise(Effect.flatMap(GameService, (games) => games.confirmRematch(context.session.user.id, data.roomId))))
