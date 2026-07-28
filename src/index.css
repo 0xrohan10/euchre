@@ -149,27 +149,33 @@
 * {
   box-sizing: border-box;
 }
+
 html {
   min-width: 320px;
   background: var(--canvas);
 }
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100dvh;
 }
+
 button,
 input {
   font: inherit;
 }
+
 button {
   color: inherit;
 }
+
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
 input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 0;
