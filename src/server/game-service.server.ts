@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, ManagedRuntime } from 'effect'
 import { db } from '../db/index.server'
 import {
@@ -111,6 +111,14 @@ function randomCode(): string {
 
 type RoomReader = Pick<typeof db, 'select'>
 type HistoryWriter = Pick<typeof db, 'insert' | 'select'>
+type TickSeat = Pick<
+  typeof roomSeat.$inferSelect,
+  'userId' | 'seat' | 'connected' | 'controller' | 'lastSeenAt'
+>
+type RoomViewSeat = Pick<
+  typeof roomSeat.$inferSelect,
+  'seat' | 'userId' | 'controller' | 'connected'
+> & { name: string | null }
 
 async function recordCompletedMatch(
   record: typeof room.$inferSelect,
@@ -214,6 +222,15 @@ async function viewRoom(
     .leftJoin(user, eq(roomSeat.userId, user.id))
     .where(eq(roomSeat.roomId, roomId))
     .orderBy(roomSeat.seat)
+  return viewRoomFromRows(userId, record, seatRows, database)
+}
+
+async function viewRoomFromRows(
+  userId: string,
+  record: typeof room.$inferSelect,
+  seatRows: RoomViewSeat[],
+  database: RoomReader,
+): Promise<RoomView> {
   const viewer = seatRows.find((seat) => {
     return seat.userId === userId
   })
@@ -221,14 +238,17 @@ async function viewRoom(
     throw new DomainError('forbidden', 'You are not seated at this table.')
   }
 
-  const votes = await database
-    .select({
-      disconnectedSeat: disconnectVote.disconnectedSeat,
-      voterUserId: disconnectVote.voterUserId,
-      approveBot: disconnectVote.approveBot,
-    })
-    .from(disconnectVote)
-    .where(eq(disconnectVote.roomId, roomId))
+  const votes =
+    record.status === 'paused'
+      ? await database
+          .select({
+            disconnectedSeat: disconnectVote.disconnectedSeat,
+            voterUserId: disconnectVote.voterUserId,
+            approveBot: disconnectVote.approveBot,
+          })
+          .from(disconnectVote)
+          .where(eq(disconnectVote.roomId, record.id))
+      : []
   const disconnectedSeat =
     record.status === 'paused'
       ? (votes[0]?.disconnectedSeat ??
@@ -245,7 +265,7 @@ async function viewRoom(
       ? await database
           .select({ userId: rematchVote.userId })
           .from(rematchVote)
-          .where(eq(rematchVote.roomId, roomId))
+          .where(eq(rematchVote.roomId, record.id))
       : []
   const humanSeats = seatRows.filter((seat) => {
     return seat.userId !== null
@@ -261,10 +281,13 @@ async function viewRoom(
     rules: record.rules,
     seats: seatRows.map((seat) => {
       return {
-        ...seat,
+        seat: seat.seat as Player,
+        userId: seat.userId,
         name: seat.name ?? `Bot ${seat.seat}`,
+        controller: seat.controller,
+        connected: seat.connected,
       }
-    }) as SeatView[],
+    }) satisfies SeatView[],
     game: record.game ? projectGame(record.game, viewer.seat as Player) : null,
     disconnectVote:
       disconnectedSeat === undefined
@@ -344,7 +367,7 @@ const GameServiceLive = Layer.succeed(
           const toPolicyInput = (
             nowMs: number,
             record: typeof room.$inferSelect,
-            seats: (typeof roomSeat.$inferSelect)[],
+            seats: TickSeat[],
           ) => {
             return {
               nowMs,
@@ -370,32 +393,49 @@ const GameServiceLive = Layer.succeed(
 
           // REPEATABLE READ keeps room+seats+view on one snapshot without taking FOR UPDATE,
           // so idle ticks stay consistent and still do not contend with command locks.
-          const preflight = await db.transaction(async (tx) => {
-            await tx.execute(sql`set local transaction isolation level repeatable read`)
-            const now = new Date()
-            const [preflightRoom] = await tx.select().from(room).where(eq(room.id, roomId)).limit(1)
-            if (!preflightRoom) {
-              throw new DomainError('not-found', 'Table not found.')
-            }
-            const preflightSeats = await tx
-              .select()
-              .from(roomSeat)
-              .where(eq(roomSeat.roomId, roomId))
-              .orderBy(roomSeat.seat)
-            const preflightCaller = preflightSeats.find((seat) => {
-              return seat.userId === userId
-            })
-            if (!preflightCaller) {
-              throw new DomainError('forbidden', 'You are not seated at this table.')
-            }
-            const preflightPolicy = evaluateTickPolicy(
-              toPolicyInput(now.getTime(), preflightRoom, preflightSeats),
-            )
-            if (!preflightPolicy.sharedMutationMayBeNeeded) {
-              return { kind: 'view' as const, view: await viewRoom(userId, roomId, tx) }
-            }
-            return { kind: 'mutate' as const }
-          })
+          const preflight = await db.transaction(
+            async (tx) => {
+              const now = new Date()
+              const [preflightRoom] = await tx
+                .select()
+                .from(room)
+                .where(eq(room.id, roomId))
+                .limit(1)
+              if (!preflightRoom) {
+                throw new DomainError('not-found', 'Table not found.')
+              }
+              const preflightSeats = await tx
+                .select({
+                  seat: roomSeat.seat,
+                  userId: roomSeat.userId,
+                  name: user.name,
+                  controller: roomSeat.controller,
+                  connected: roomSeat.connected,
+                  lastSeenAt: roomSeat.lastSeenAt,
+                })
+                .from(roomSeat)
+                .leftJoin(user, eq(roomSeat.userId, user.id))
+                .where(eq(roomSeat.roomId, roomId))
+                .orderBy(roomSeat.seat)
+              const preflightCaller = preflightSeats.find((seat) => {
+                return seat.userId === userId
+              })
+              if (!preflightCaller) {
+                throw new DomainError('forbidden', 'You are not seated at this table.')
+              }
+              const preflightPolicy = evaluateTickPolicy(
+                toPolicyInput(now.getTime(), preflightRoom, preflightSeats),
+              )
+              if (!preflightPolicy.sharedMutationMayBeNeeded) {
+                return {
+                  kind: 'view' as const,
+                  view: await viewRoomFromRows(userId, preflightRoom, preflightSeats, tx),
+                }
+              }
+              return { kind: 'mutate' as const }
+            },
+            { isolationLevel: 'repeatable read' },
+          )
           if (preflight.kind === 'view') {
             return preflight.view
           }

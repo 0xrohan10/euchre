@@ -181,6 +181,13 @@ describeIntegration('GameService.tick lock and race behavior', () => {
         }),
       ])
       expect(result.kind).toBe('resolved')
+      if (result.kind === 'resolved') {
+        for (const seat of result.view.seats) {
+          expect(Object.keys(seat).sort()).toEqual(
+            ['connected', 'controller', 'name', 'seat', 'userId'].sort(),
+          )
+        }
+      }
     })
 
     const after = await seatSnapshot(roomId, host)
