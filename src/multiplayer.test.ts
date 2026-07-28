@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { createDeck, createGame } from './game'
-import { acceptRoomUpdate, acceptsRoomAction, advanceBot, canPassCalling, eligibleBotVoters, playerAt, projectGame, relativePlayer, statusForGame, statusForPresence, type RoomView, type SeatView } from './multiplayer'
+import { acceptRoomUpdate, acceptsRoomAction, advanceBot, canPassCalling, eligibleBotVoters, optimisticRoomAction, playerAt, projectGame, relativePlayer, statusForGame, statusForPresence, type RoomView, type SeatView } from './multiplayer'
 
 it('projects only the authenticated player hand', () => {
   const game = createGame(createDeck())
@@ -41,6 +41,50 @@ it('never replaces a newer room view with a stale response', () => {
 
   expect(acceptRoomUpdate(current, stale)).toBe(current)
   expect(acceptRoomUpdate(current, otherRoom)).toBe(otherRoom)
+})
+
+it('optimistically moves a played card from the hand to the trick', () => {
+  const game = createGame(createDeck())
+  game.phase = 'playing'
+  game.activePlayer = 0
+  game.trump = 'clubs'
+  const room = { id: 'room', viewerSeat: 0, game: projectGame(game, 0) } as RoomView
+  const card = room.game!.hand[0]
+
+  const optimistic = optimisticRoomAction(room, { type: 'play', cardId: card.id })
+
+  expect(optimistic.game!.hand).not.toContainEqual(card)
+  expect(optimistic.game!.handCounts[0]).toBe(4)
+  expect(optimistic.game!.trick.at(-1)).toEqual({ player: 0, card })
+  expect(room.game!.hand).toContainEqual(card)
+})
+
+it('optimistically advances bidding with the shared game reducer', () => {
+  const game = createGame(createDeck())
+  const room = { id: 'room', viewerSeat: game.activePlayer, game: projectGame(game, game.activePlayer) } as RoomView
+
+  const passed = optimisticRoomAction(room, { type: 'pass' })
+
+  expect(passed.game!.activePlayer).toBe((game.activePlayer + 1) % 4)
+  expect(passed.game!.notice).toContain('passes')
+  expect(room.game!.activePlayer).toBe(game.activePlayer)
+})
+
+it('optimistically orders up the dealer', () => {
+  const game = createGame(createDeck())
+  game.rules.requireNaturalTrump = false
+  const room = { id: 'room', viewerSeat: game.activePlayer, game: projectGame(game, game.activePlayer) } as RoomView
+
+  const ordered = optimisticRoomAction(room, { type: 'order-up', alone: true })
+
+  expect(ordered.game).toMatchObject({
+    phase: 'discarding',
+    activePlayer: game.dealer,
+    trump: game.upCard.suit,
+    maker: game.activePlayer,
+    lonePlayer: game.activePlayer,
+  })
+  expect(ordered.game!.handCounts[game.dealer]).toBe(6)
 })
 
 it('allows the stuck dealer to redeal when no suit is callable', () => {

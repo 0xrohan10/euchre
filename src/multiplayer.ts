@@ -79,6 +79,36 @@ export function acceptRoomUpdate(current: RoomView | null, next: RoomView): Room
   return current && current.id === next.id && current.version > next.version ? current : next
 }
 
+export function optimisticRoomAction(room: RoomView, action: GameAction): RoomView {
+  const game = room.game
+  if (!game) return room
+
+  if (action.type === 'next-hand' || action.type === 'new-match' || action.type === 'collect-trick' || action.type === 'set-rule') {
+    return { ...room, game: { ...game, notice: 'Updating table...' } }
+  }
+
+  if (action.type === 'pass' && game.phase === 'calling' && game.activePlayer === game.dealer) {
+    return { ...room, game: { ...game, notice: 'Redealing...' } }
+  }
+
+  const { hand, handCounts: currentHandCounts, ...publicGame } = game
+  const hands: GameState['hands'] = [[], [], [], []]
+  hands[room.viewerSeat] = hand
+  const optimisticGame = reduceGame({ ...publicGame, hands, kitty: [] }, action)
+  const projected = projectGame(optimisticGame, room.viewerSeat)
+  const handCounts = [...currentHandCounts] as GameView['handCounts']
+
+  if (action.type === 'order-up') handCounts[game.dealer] += 1
+  if (action.type === 'play' || action.type === 'discard') handCounts[room.viewerSeat] -= 1
+  projected.handCounts = handCounts
+
+  return {
+    ...room,
+    status: statusForGame(optimisticGame),
+    game: projected,
+  }
+}
+
 export function canPassCalling(stickDealer: boolean, isDealer: boolean, callableSuitCount: number): boolean {
   return !stickDealer || !isDealer || callableSuitCount === 0
 }

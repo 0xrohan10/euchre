@@ -4,7 +4,7 @@ import { authClient } from './lib/auth-client'
 import { cardBackImage, cardImage, scoreFiveImages } from './card-assets'
 import { createRoomFn, createSinglePlayerRoomFn, getCurrentRoomFn, getRoomFn, joinRoomFn, leaveRoomFn, submitCommandFn, voteForBotFn } from './server/game.functions'
 import { hasNaturalTrump, legalCards, sortHand, SUITS, teamOf, type Card, type GameAction, type Player, type Suit } from './game'
-import { acceptRoomUpdate, canPassCalling, playerAt, relativePlayer, type RoomView, type SeatView } from './multiplayer'
+import { acceptRoomUpdate, canPassCalling, optimisticRoomAction, playerAt, relativePlayer, type RoomView, type SeatView } from './multiplayer'
 import './App.css'
 
 const SUIT_SYMBOL: Record<Suit, string> = { clubs: '♣', diamonds: '♦', hearts: '♥', spades: '♠' }
@@ -147,13 +147,14 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
   const viewer = room.viewerSeat
   const viewerTeam = teamOf(viewer)
   const opponentTeam = (1 - viewerTeam) as 0 | 1
-  const isTurn = room.status === 'playing' && game.activePlayer === viewer
+  const isTurn = !pending && room.status === 'playing' && game.activePlayer === viewer
   const hand = sortHand(game.hand, game.trump)
   const legal = game.phase === 'playing' && game.trump ? new Set(legalCards(game.hand, game.trick, game.trump).map((card) => card.id)) : new Set<string>()
 
   async function act(action: GameAction) {
     setPending(true)
     setError('')
+    onRoom(optimisticRoomAction(room, action))
     try {
       const next = await submitCommandFn({ data: { roomId: room.id, commandId: crypto.randomUUID(), expectedVersion: room.version, action } })
       onRoom(next)
@@ -178,7 +179,7 @@ function GameTable({ room, onRoom, onLeave }: { room: RoomView; onRoom: (room: R
     }
   }
 
-  const controls = isTurn && !pending && (game.phase === 'ordering' || game.phase === 'calling')
+  const controls = isTurn && (game.phase === 'ordering' || game.phase === 'calling')
   const availableSuits = SUITS.filter((suit) => game.phase === 'calling' && suit !== game.upCard.suit && (!game.rules.requireNaturalTrump || hasNaturalTrump(game.hand, suit)))
   return <div className="game-shell">
     <header className="app-header"><Brand /><div className="room-meta"><span className="eyebrow">{singlePlayer ? 'Single player' : 'Table'}</span>{!singlePlayer && <button className="room-code" onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/games/${room.code}`)}>{room.code}</button>}</div><div className="header-actions">{singlePlayer && <button className="quiet-button" onClick={() => setConfirmLeave(true)}>Leave game</button>}<button className="quiet-button" onClick={() => void authClient.signOut().then(() => window.location.reload())}>Sign out</button></div></header>
