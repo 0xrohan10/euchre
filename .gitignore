@@ -13,7 +13,9 @@ dist-ssr
 .tanstack
 .wrangler
 *.local
-.env
+.env*
+!.env.example
+plans
 
 # Editor directories and files
 .vscode/*
