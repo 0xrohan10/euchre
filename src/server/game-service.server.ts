@@ -8,7 +8,6 @@ import {
   gameHistoryParticipant,
   party,
   partyMember,
-  playerRating,
   rematchVote,
   room,
   roomCommand,
@@ -20,21 +19,25 @@ import { teamOf, type Player } from '../game/player'
 import type { GameHistorySeat, GameHistorySummary } from '../game/history'
 import { reduceGame } from '../game/reduce'
 import type { GameRules } from '../game/rules'
-import { BASE_SKILL_RATING, type RatingMode } from '../game/skill'
+import type { RatingMode } from '../game/skill'
 import type { GameAction, GameState } from '../game/state'
 import {
   acceptsRoomAction,
   advanceBot,
   eligibleBotVoters,
-  projectGame,
   statusForGame,
   statusForPresence,
   type PartyView,
   type PlayerAction,
   type RoomView,
-  type SeatView,
 } from '../multiplayer'
 import { evaluateTickPolicy } from './tick-policy'
+import {
+  loadLatestRoomSnapshot,
+  loadRoomSnapshot,
+  projectRoomSnapshot,
+  type RoomSnapshot,
+} from './room-view.server'
 import {
   pendingEvidenceFromGame,
   persistRatingOutbox,
@@ -136,11 +139,6 @@ type TickSeat = Pick<
   typeof roomSeat.$inferSelect,
   'userId' | 'seat' | 'connected' | 'controller' | 'lastSeenAt'
 >
-type RoomViewSeat = Pick<
-  typeof roomSeat.$inferSelect,
-  'seat' | 'userId' | 'controller' | 'connected'
-> & { name: string | null }
-
 function ratingModeForSeats(
   seats: readonly Pick<typeof roomSeat.$inferSelect, 'userId' | 'controller'>[],
 ): RatingMode {
@@ -331,156 +329,18 @@ async function viewParty(userId: string, database: RoomReader): Promise<PartyVie
 }
 
 async function viewRoom(userId: string, roomId: string, database: RoomReader): Promise<RoomView> {
-  const [record] = await database.select().from(room).where(eq(room.id, roomId)).limit(1)
-  if (!record) {
-    throw new DomainError('not-found', 'Table not found.')
-  }
-
-  const seatRows = await database
-    .select({
-      seat: roomSeat.seat,
-      userId: roomSeat.userId,
-      name: user.name,
-      controller: roomSeat.controller,
-      connected: roomSeat.connected,
-    })
-    .from(roomSeat)
-    .leftJoin(user, eq(roomSeat.userId, user.id))
-    .where(eq(roomSeat.roomId, roomId))
-    .orderBy(roomSeat.seat)
-  return viewRoomFromRows(userId, record, seatRows, database)
+  return viewFromSnapshot(userId, await loadRoomSnapshot(database, roomId))
 }
 
-async function viewRoomFromRows(
-  userId: string,
-  record: typeof room.$inferSelect,
-  seatRows: RoomViewSeat[],
-  database: RoomReader,
-): Promise<RoomView> {
-  const viewer = seatRows.find((seat) => {
-    return seat.userId === userId
-  })
-  if (!viewer) {
+function viewFromSnapshot(userId: string, snapshot: RoomSnapshot | null): RoomView {
+  if (!snapshot) {
+    throw new DomainError('not-found', 'Table not found.')
+  }
+  const view = projectRoomSnapshot(snapshot, userId)
+  if (!view) {
     throw new DomainError('forbidden', 'You are not seated at this table.')
   }
-
-  const votes =
-    record.status === 'paused'
-      ? await database
-          .select({
-            disconnectedSeat: disconnectVote.disconnectedSeat,
-            voterUserId: disconnectVote.voterUserId,
-            approveBot: disconnectVote.approveBot,
-          })
-          .from(disconnectVote)
-          .where(eq(disconnectVote.roomId, record.id))
-      : []
-  const disconnectedSeat =
-    record.status === 'paused'
-      ? (votes[0]?.disconnectedSeat ??
-        seatRows.find((seat) => {
-          return !seat.connected && seat.controller === 'human'
-        })?.seat)
-      : undefined
-  const eligibleVoters =
-    disconnectedSeat === undefined
-      ? []
-      : eligibleBotVoters(seatRows as SeatView[], disconnectedSeat as Player)
-  const rematchVotes =
-    record.partyId && record.game?.phase === 'match-over'
-      ? await database
-          .select({ userId: rematchVote.userId })
-          .from(rematchVote)
-          .where(eq(rematchVote.roomId, record.id))
-      : []
-  const humanSeats = seatRows.filter((seat) => {
-    return seat.userId !== null
-  })
-  const ratingMode = record.game
-    ? (record.game.ratingMode ?? 'assisted')
-    : ratingModeForSeats(seatRows)
-  const ratingUserIds = humanSeats.flatMap((seat) => {
-    return seat.userId ? [seat.userId] : []
-  })
-  const ratings =
-    ratingUserIds.length === 0
-      ? []
-      : await database
-          .select({
-            userId: playerRating.userId,
-            rating: playerRating.rating,
-            gamesPlayed: playerRating.gamesPlayed,
-          })
-          .from(playerRating)
-          .where(
-            and(eq(playerRating.mode, ratingMode), inArray(playerRating.userId, ratingUserIds)),
-          )
-  const ratingsByUser = new Map(
-    ratings.map((rating) => {
-      return [rating.userId, rating]
-    }),
-  )
-  return {
-    id: record.id,
-    code: record.code,
-    status: record.status,
-    version: record.version,
-    hostUserId: record.hostUserId,
-    partyId: record.partyId,
-    viewerSeat: viewer.seat as Player,
-    rules: record.rules,
-    seats: seatRows.map((seat) => {
-      const rating = seat.userId ? ratingsByUser.get(seat.userId) : undefined
-      return {
-        seat: seat.seat as Player,
-        userId: seat.userId,
-        name: seat.name ?? `Bot ${seat.seat}`,
-        controller: seat.controller,
-        connected: seat.connected,
-        rating: seat.userId ? (rating?.rating ?? BASE_SKILL_RATING) : null,
-        ratingGames: rating?.gamesPlayed ?? 0,
-        ratingMode,
-      }
-    }) satisfies SeatView[],
-    game: record.game ? projectGame(record.game, viewer.seat as Player) : null,
-    disconnectVote:
-      disconnectedSeat === undefined
-        ? null
-        : {
-            disconnectedSeat: disconnectedSeat as Player,
-            approvals: votes
-              .filter((vote) => {
-                return (
-                  vote.approveBot &&
-                  eligibleVoters.some((seat) => {
-                    return seat.userId === vote.voterUserId
-                  })
-                )
-              })
-              .flatMap((vote) => {
-                const voter = seatRows.find((seat) => {
-                  return seat.userId === vote.voterUserId
-                })
-                return voter ? [voter.seat as Player] : []
-              }),
-            requiredApprovals: eligibleVoters.length,
-          },
-    rematch:
-      record.partyId && record.game?.phase === 'match-over'
-        ? {
-            confirmations: humanSeats
-              .filter((seat) => {
-                return rematchVotes.some((vote) => {
-                  return vote.userId === seat.userId
-                })
-              })
-              .map((seat) => {
-                return seat.seat as Player
-              }),
-            requiredConfirmations: 2,
-          }
-        : null,
-  }
+  return view
 }
 
 // Keep the service definition flat so changes do not reindent this large module.
@@ -556,40 +416,16 @@ const createGameService = (
           const preflight = await db.transaction(
             async (tx) => {
               const now = new Date()
-              const [preflightRoom] = await tx
-                .select()
-                .from(room)
-                .where(eq(room.id, roomId))
-                .limit(1)
-              if (!preflightRoom) {
-                throw new DomainError('not-found', 'Table not found.')
-              }
-              const preflightSeats = await tx
-                .select({
-                  seat: roomSeat.seat,
-                  userId: roomSeat.userId,
-                  name: user.name,
-                  controller: roomSeat.controller,
-                  connected: roomSeat.connected,
-                  lastSeenAt: roomSeat.lastSeenAt,
-                })
-                .from(roomSeat)
-                .leftJoin(user, eq(roomSeat.userId, user.id))
-                .where(eq(roomSeat.roomId, roomId))
-                .orderBy(roomSeat.seat)
-              const preflightCaller = preflightSeats.find((seat) => {
-                return seat.userId === userId
-              })
-              if (!preflightCaller) {
-                throw new DomainError('forbidden', 'You are not seated at this table.')
-              }
+              const snapshot = await loadRoomSnapshot(tx, roomId)
+              viewFromSnapshot(userId, snapshot)
+              const { room: preflightRoom, seats: preflightSeats } = snapshot!
               const preflightPolicy = evaluateTickPolicy(
                 toPolicyInput(now.getTime(), preflightRoom, preflightSeats),
               )
               if (!preflightPolicy.sharedMutationMayBeNeeded) {
                 return {
                   kind: 'view' as const,
-                  view: await viewRoomFromRows(userId, preflightRoom, preflightSeats, tx),
+                  view: viewFromSnapshot(userId, snapshot),
                 }
               }
               return { kind: 'mutate' as const }
@@ -603,20 +439,9 @@ const createGameService = (
           const ratingSignals: string[] = []
           const result = await db.transaction(async (tx) => {
             const lockedNow = new Date()
-            const [record] = await tx
-              .select()
-              .from(room)
-              .where(eq(room.id, roomId))
-              .for('update')
-              .limit(1)
-            if (!record) {
-              throw new DomainError('not-found', 'Table not found.')
-            }
-            const seats = await tx
-              .select()
-              .from(roomSeat)
-              .where(eq(roomSeat.roomId, roomId))
-              .orderBy(roomSeat.seat)
+            const snapshot = await loadRoomSnapshot(tx, roomId, { forUpdate: true })
+            viewFromSnapshot(userId, snapshot)
+            const { room: record, seats } = snapshot!
             const caller = seats.find((seat) => {
               return seat.userId === userId
             })
@@ -627,7 +452,7 @@ const createGameService = (
               toPolicyInput(lockedNow.getTime(), record, seats),
             )
             if (!lockedPolicy.sharedMutationMayBeNeeded) {
-              return viewRoom(userId, roomId, tx)
+              return viewFromSnapshot(userId, snapshot)
             }
 
             const callerReconnected = lockedPolicy.reconnectWorkDue
@@ -667,12 +492,20 @@ const createGameService = (
               )
             })
             if (staleSeats.length > 0) {
-              for (const seat of staleSeats) {
-                await tx
-                  .update(roomSeat)
-                  .set({ connected: false })
-                  .where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.seat, seat.seat)))
-              }
+              await tx
+                .update(roomSeat)
+                .set({ connected: false })
+                .where(
+                  and(
+                    eq(roomSeat.roomId, roomId),
+                    inArray(
+                      roomSeat.seat,
+                      staleSeats.map((seat) => {
+                        return seat.seat
+                      }),
+                    ),
+                  ),
+                )
             }
             const currentSeats = renewedSeats.map((seat) => {
               return staleSeats.some((stale) => {
@@ -713,6 +546,12 @@ const createGameService = (
                 .update(room)
                 .set({ status, game: enrolledGame, updatedAt: lockedNow })
                 .where(eq(room.id, roomId))
+              snapshot!.room = {
+                ...snapshot!.room,
+                status,
+                game: enrolledGame,
+                updatedAt: lockedNow,
+              }
             }
             if (staleSeats.length === 0 && enrolledGame && status === 'playing') {
               const elapsed = lockedNow.getTime() - record.updatedAt.getTime()
@@ -763,9 +602,22 @@ const createGameService = (
                     updatedAt: lockedNow,
                   })
                   .where(eq(room.id, roomId))
+                snapshot!.room = {
+                  ...snapshot!.room,
+                  game,
+                  status: statusForGame(game),
+                  version: record.version + 1,
+                  updatedAt: lockedNow,
+                }
               }
             }
-            return viewRoom(userId, roomId, tx)
+            snapshot!.seats = currentSeats
+            if (callerReconnected) {
+              snapshot!.disconnectVotes = snapshot!.disconnectVotes.filter((vote) => {
+                return vote.disconnectedSeat !== caller.seat
+              })
+            }
+            return viewFromSnapshot(userId, snapshot)
           })
           await signalRatings(ratingQueue, ratingSignals)
           return result
@@ -777,14 +629,8 @@ const createGameService = (
       return Effect.tryPromise({
         try: () => {
           return db.transaction(async (tx) => {
-            const [seat] = await tx
-              .select({ roomId: roomSeat.roomId })
-              .from(roomSeat)
-              .innerJoin(room, eq(roomSeat.roomId, room.id))
-              .where(eq(roomSeat.userId, userId))
-              .orderBy(desc(room.updatedAt))
-              .limit(1)
-            return seat ? viewRoom(userId, seat.roomId, tx) : null
+            const snapshot = await loadLatestRoomSnapshot(tx, userId)
+            return snapshot ? viewFromSnapshot(userId, snapshot) : null
           })
         },
         catch: failure,
@@ -807,14 +653,8 @@ const createGameService = (
             return viewParty(userId, tx)
           })
           const roomView = await db.transaction(async (tx) => {
-            const [seat] = await tx
-              .select({ roomId: roomSeat.roomId })
-              .from(roomSeat)
-              .innerJoin(room, eq(roomSeat.roomId, room.id))
-              .where(eq(roomSeat.userId, userId))
-              .orderBy(desc(room.updatedAt))
-              .limit(1)
-            return seat ? viewRoom(userId, seat.roomId, tx) : null
+            const snapshot = await loadLatestRoomSnapshot(tx, userId)
+            return snapshot ? viewFromSnapshot(userId, snapshot) : null
           })
           return { party: partyView, room: roomView }
         },
@@ -855,7 +695,7 @@ const createGameService = (
               .select()
               .from(party)
               .where(eq(party.inviteCode, inviteCode))
-              .for('update')
+              .for('update', { of: party })
               .limit(1)
             if (!record) {
               throw new DomainError('not-found', 'Partner invite not found.')
@@ -894,7 +734,7 @@ const createGameService = (
               .select()
               .from(party)
               .where(eq(party.id, membership.partyId))
-              .for('update')
+              .for('update', { of: party })
               .limit(1)
             if (!record) {
               throw new DomainError('not-found', 'Partnership not found.')
@@ -917,7 +757,7 @@ const createGameService = (
                 ),
               )
               .orderBy(desc(room.updatedAt))
-              .for('update')
+              .for('update', { of: room })
               .limit(1)
             if (activeRoom?.game) {
               const seats = await tx
@@ -1029,7 +869,7 @@ const createGameService = (
               .select()
               .from(party)
               .where(eq(party.id, membership.partyId))
-              .for('update')
+              .for('update', { of: party })
               .limit(1)
             if (!record || record.ownerUserId !== userId) {
               throw new DomainError('forbidden', 'Only the party creator can start a match.')
@@ -1192,7 +1032,7 @@ const createGameService = (
               .select()
               .from(room)
               .where(eq(room.code, code.toUpperCase()))
-              .for('update')
+              .for('update', { of: room })
               .limit(1)
             if (!record) {
               throw new DomainError('not-found', 'Invite code not found.')
@@ -1248,7 +1088,7 @@ const createGameService = (
               .select()
               .from(room)
               .where(eq(room.id, roomId))
-              .for('update')
+              .for('update', { of: room })
               .limit(1)
             if (!record) {
               throw new DomainError('not-found', 'Table not found.')
@@ -1335,38 +1175,23 @@ const createGameService = (
         try: async () => {
           const ratingSignals: string[] = []
           const result = await db.transaction(async (tx) => {
-            const [record] = await tx
-              .select()
-              .from(room)
-              .where(eq(room.id, command.roomId))
-              .for('update')
-              .limit(1)
-            if (!record?.game) {
+            const snapshot = await loadRoomSnapshot(tx, command.roomId, {
+              commandId: command.commandId,
+              forUpdate: true,
+            })
+            const record = snapshot?.room
+            if (!snapshot || !record?.game) {
               throw new DomainError('not-found', 'Active game not found.')
             }
-            const seats = await tx
-              .select()
-              .from(roomSeat)
-              .where(eq(roomSeat.roomId, command.roomId))
-              .orderBy(roomSeat.seat)
+            const seats = snapshot.seats
             const actor = seats.find((seat) => {
               return seat.userId === userId
             })
             if (!actor) {
               throw new DomainError('forbidden', 'You are not seated at this table.')
             }
-            const [duplicate] = await tx
-              .select()
-              .from(roomCommand)
-              .where(
-                and(
-                  eq(roomCommand.roomId, command.roomId),
-                  eq(roomCommand.commandId, command.commandId),
-                ),
-              )
-              .limit(1)
-            if (duplicate) {
-              return viewRoom(userId, command.roomId, tx)
+            if (snapshot.command) {
+              return viewFromSnapshot(userId, snapshot)
             }
             if (!acceptsRoomAction(record.status, record.game.phase, command.action.type)) {
               throw new DomainError(
@@ -1440,17 +1265,28 @@ const createGameService = (
               userId,
               action: command.action as GameAction,
             })
+            const matchId =
+              command.action.type === 'new-match' ? crypto.randomUUID() : record.matchId
+            const updatedAt = new Date()
             await tx
               .update(room)
               .set({
                 game: reduced,
                 status,
-                matchId: command.action.type === 'new-match' ? crypto.randomUUID() : record.matchId,
+                matchId,
                 version: record.version + 1,
-                updatedAt: new Date(),
+                updatedAt,
               })
               .where(eq(room.id, command.roomId))
-            return viewRoom(userId, command.roomId, tx)
+            snapshot.room = {
+              ...record,
+              game: reduced,
+              status,
+              matchId,
+              version: record.version + 1,
+              updatedAt,
+            }
+            return viewFromSnapshot(userId, snapshot)
           })
           await signalRatings(ratingQueue, ratingSignals)
           return result
@@ -1463,17 +1299,9 @@ const createGameService = (
         return Effect.tryPromise({
           try: () => {
             return db.transaction(async (tx) => {
-              const [record] = await tx
-                .select()
-                .from(room)
-                .where(eq(room.id, roomId))
-                .for('update')
-                .limit(1)
-              const seats = await tx
-                .select()
-                .from(roomSeat)
-                .where(eq(roomSeat.roomId, roomId))
-                .orderBy(roomSeat.seat)
+              const snapshot = await loadRoomSnapshot(tx, roomId, { forUpdate: true })
+              const record = snapshot?.room
+              const seats = snapshot?.seats ?? []
               const voter = seats.find((seat) => {
                 return seat.userId === userId
               })
@@ -1483,6 +1311,7 @@ const createGameService = (
                 )
               })
               if (
+                !snapshot ||
                 !record?.game ||
                 record.status !== 'paused' ||
                 !voter ||
@@ -1494,17 +1323,9 @@ const createGameService = (
                 throw new DomainError('invalid', 'There is no active replacement vote.')
               }
               const eligibleVoters = eligibleBotVoters(seats, disconnected.seat as Player)
-              const [previousVote] = await tx
-                .select()
-                .from(disconnectVote)
-                .where(
-                  and(
-                    eq(disconnectVote.roomId, roomId),
-                    eq(disconnectVote.disconnectedSeat, disconnected.seat),
-                    eq(disconnectVote.voterUserId, userId),
-                  ),
-                )
-                .limit(1)
+              const previousVote = snapshot.disconnectVotes.find((vote) => {
+                return vote.disconnectedSeat === disconnected.seat && vote.voterUserId === userId
+              })
               await tx
                 .insert(disconnectVote)
                 .values({
@@ -1521,15 +1342,25 @@ const createGameService = (
                   ],
                   set: { approveBot: approve, createdAt: new Date() },
                 })
-              const votes = await tx
-                .select()
-                .from(disconnectVote)
-                .where(
-                  and(
-                    eq(disconnectVote.roomId, roomId),
-                    eq(disconnectVote.disconnectedSeat, disconnected.seat),
-                  ),
-                )
+              const submittedVote = {
+                roomId,
+                disconnectedSeat: disconnected.seat,
+                voterUserId: userId,
+                approveBot: approve,
+                createdAt: new Date(),
+              }
+              const votes = [
+                ...snapshot.disconnectVotes.filter((vote) => {
+                  return vote.disconnectedSeat === disconnected.seat && vote.voterUserId !== userId
+                }),
+                submittedVote,
+              ]
+              snapshot.disconnectVotes = [
+                ...snapshot.disconnectVotes.filter((vote) => {
+                  return vote.disconnectedSeat !== disconnected.seat
+                }),
+                ...votes,
+              ]
               if (
                 eligibleVoters.length > 0 &&
                 eligibleVoters.every((seat) => {
@@ -1556,18 +1387,30 @@ const createGameService = (
                   disconnected.userId === record.hostUserId
                     ? (eligibleVoters[0]?.userId ?? record.hostUserId)
                     : record.hostUserId
+                const updatedAt = new Date()
                 await tx
                   .update(room)
-                  .set({ status, hostUserId, version: record.version + 1, updatedAt: new Date() })
+                  .set({ status, hostUserId, version: record.version + 1, updatedAt })
                   .where(eq(room.id, roomId))
                 await tx.delete(disconnectVote).where(eq(disconnectVote.roomId, roomId))
+                snapshot.seats = controlledSeats
+                snapshot.disconnectVotes = []
+                snapshot.room = {
+                  ...record,
+                  status,
+                  hostUserId,
+                  version: record.version + 1,
+                  updatedAt,
+                }
               } else if (!previousVote || previousVote.approveBot !== approve) {
+                const updatedAt = new Date()
                 await tx
                   .update(room)
-                  .set({ version: record.version + 1, updatedAt: new Date() })
+                  .set({ version: record.version + 1, updatedAt })
                   .where(eq(room.id, roomId))
+                snapshot.room = { ...record, version: record.version + 1, updatedAt }
               }
-              return viewRoom(userId, roomId, tx)
+              return viewFromSnapshot(userId, snapshot)
             })
           },
           catch: failure,
@@ -1579,20 +1422,17 @@ const createGameService = (
         try: async () => {
           const ratingSignals: string[] = []
           const result = await db.transaction(async (tx) => {
-            const [record] = await tx
-              .select()
-              .from(room)
-              .where(eq(room.id, roomId))
-              .for('update')
-              .limit(1)
-            if (!record?.partyId || !record.game || record.game.phase !== 'match-over') {
+            const snapshot = await loadRoomSnapshot(tx, roomId, { forUpdate: true })
+            const record = snapshot?.room
+            if (
+              !snapshot ||
+              !record?.partyId ||
+              !record.game ||
+              record.game.phase !== 'match-over'
+            ) {
               throw new DomainError('invalid', 'This match is not ready for a rematch.')
             }
-            const seats = await tx
-              .select()
-              .from(roomSeat)
-              .where(eq(roomSeat.roomId, roomId))
-              .orderBy(roomSeat.seat)
+            const seats = snapshot.seats
             const actor = seats.find((seat) => {
               return seat.userId === userId && seat.controller === 'human' && seat.connected
             })
@@ -1606,7 +1446,12 @@ const createGameService = (
               throw new DomainError('conflict', 'A partner is required for a rematch.')
             }
             await tx.insert(rematchVote).values({ roomId, userId }).onConflictDoNothing()
-            const votes = await tx.select().from(rematchVote).where(eq(rematchVote.roomId, roomId))
+            const votes = snapshot.rematchVotes.some((vote) => {
+              return vote.userId === userId
+            })
+              ? snapshot.rematchVotes
+              : [...snapshot.rematchVotes, { roomId, userId, createdAt: new Date() }]
+            snapshot.rematchVotes = votes
             if (
               humans.every((seat) => {
                 return votes.some((vote) => {
@@ -1619,24 +1464,37 @@ const createGameService = (
                 ratingSignals.push(gameHistoryId)
               }
               const game = withRatingContext(reduceGame(record.game, { type: 'new-match' }), seats)
+              const matchId = crypto.randomUUID()
+              const updatedAt = new Date()
               await tx.delete(rematchVote).where(eq(rematchVote.roomId, roomId))
               await tx
                 .update(room)
                 .set({
                   game,
-                  matchId: crypto.randomUUID(),
+                  matchId,
                   status: statusForGame(game),
                   version: record.version + 1,
-                  updatedAt: new Date(),
+                  updatedAt,
                 })
                 .where(eq(room.id, roomId))
+              snapshot.rematchVotes = []
+              snapshot.room = {
+                ...record,
+                game,
+                matchId,
+                status: statusForGame(game),
+                version: record.version + 1,
+                updatedAt,
+              }
             } else {
+              const updatedAt = new Date()
               await tx
                 .update(room)
-                .set({ version: record.version + 1, updatedAt: new Date() })
+                .set({ version: record.version + 1, updatedAt })
                 .where(eq(room.id, roomId))
+              snapshot.room = { ...record, version: record.version + 1, updatedAt }
             }
-            return viewRoom(userId, roomId, tx)
+            return viewFromSnapshot(userId, snapshot)
           })
           await signalRatings(ratingQueue, ratingSignals)
           return result
@@ -1649,28 +1507,23 @@ const createGameService = (
         return Effect.tryPromise({
           try: async () => {
             return db.transaction(async (tx) => {
-              const [record] = await tx
-                .select()
-                .from(room)
-                .where(eq(room.id, roomId))
-                .for('update')
-                .limit(1)
-              const [seat] = await tx
-                .select()
-                .from(roomSeat)
-                .where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.userId, userId)))
-                .limit(1)
-              if (!record || !seat) {
+              const snapshot = await loadRoomSnapshot(tx, roomId, { forUpdate: true })
+              const record = snapshot?.room
+              const seat = snapshot?.seats.find((seat) => {
+                return seat.userId === userId
+              })
+              if (!snapshot || !record || !seat) {
                 throw new DomainError('forbidden', 'You are not seated at this table.')
               }
               const presenceChanged =
                 seat.connected !== connected || (connected && seat.controller !== 'human')
+              const presenceAt = new Date()
               await tx
                 .update(roomSeat)
                 .set({
                   connected,
                   controller: connected ? 'human' : seat.controller,
-                  lastSeenAt: new Date(),
+                  lastSeenAt: presenceAt,
                 })
                 .where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.userId, userId)))
               if (connected) {
@@ -1682,16 +1535,28 @@ const createGameService = (
                       eq(disconnectVote.disconnectedSeat, seat.seat),
                     ),
                   )
+                snapshot.disconnectVotes = snapshot.disconnectVotes.filter((vote) => {
+                  return vote.disconnectedSeat !== seat.seat
+                })
               }
-              const disconnectedSeats = await tx
-                .select()
-                .from(roomSeat)
-                .where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.connected, false)))
-              const hasDisconnectedHuman = disconnectedSeats.some((other) => {
-                return other.controller === 'human'
+              const currentSeats = snapshot.seats.map((other) => {
+                return other.seat === seat.seat
+                  ? {
+                      ...other,
+                      connected,
+                      controller: connected ? ('human' as const) : other.controller,
+                      lastSeenAt: presenceAt,
+                    }
+                  : other
               })
-              const hostDisconnected = disconnectedSeats.some((other) => {
-                return other.userId === record.hostUserId && other.controller === 'human'
+              snapshot.seats = currentSeats
+              const hasDisconnectedHuman = currentSeats.some((other) => {
+                return !other.connected && other.controller === 'human'
+              })
+              const hostDisconnected = currentSeats.some((other) => {
+                return other.controller === 'human'
+                  ? other.userId === record.hostUserId && !other.connected
+                  : false
               })
               const status = statusForPresence(
                 record.status,
@@ -1705,12 +1570,11 @@ const createGameService = (
                 controller: connected ? 'human' : seat.controller,
               })
               if (presenceChanged || status !== record.status || game !== record.game) {
-                await tx
-                  .update(room)
-                  .set({ status, game, updatedAt: new Date() })
-                  .where(eq(room.id, roomId))
+                const updatedAt = new Date()
+                await tx.update(room).set({ status, game, updatedAt }).where(eq(room.id, roomId))
+                snapshot.room = { ...record, status, game, updatedAt }
               }
-              return viewRoom(userId, roomId, tx)
+              return viewFromSnapshot(userId, snapshot)
             })
           },
           catch: failure,
