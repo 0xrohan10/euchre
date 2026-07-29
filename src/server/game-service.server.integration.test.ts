@@ -2,7 +2,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import pg from 'pg'
-import { party, partyMember, room, roomSeat, user } from '../db/schema'
+import { party, partyJoin, partyMember, room, roomSeat, user } from '../db/schema'
 import { DEFAULT_RULES } from '../game/rules'
 import { createGame } from '../game/deal'
 import { createDeck } from '../game/card'
@@ -21,7 +21,7 @@ function uniqueId(label: string) {
 describeIntegration('GameService.tick lock and race behavior', () => {
   const admin = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
-    max: 4,
+    max: 6,
   })
   const queries: string[] = []
   const db = drizzle({
@@ -136,6 +136,16 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     return created.id
   }
 
+  async function insertOpenParty(ownerUserId: string) {
+    const [created] = await db
+      .insert(party)
+      .values({ ownerUserId })
+      .returning({ id: party.id, inviteCode: party.inviteCode })
+    createdPartyIds.push(created.id)
+    await db.insert(partyMember).values({ partyId: created.id, userId: ownerUserId })
+    return created
+  }
+
   async function seatSnapshot(roomId: string, seatUserId: string) {
     const rows = await db.select().from(roomSeat).where(eq(roomSeat.roomId, roomId))
     const match = rows.find((row) => {
@@ -206,6 +216,57 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     }
   }
 
+  async function withPartyLockBarrier<T>(
+    partyId: string,
+    work: (hold: {
+      release: () => Promise<void>
+      waitForBlockedJoins: (count: number) => Promise<void>
+    }) => Promise<T>,
+  ) {
+    const client = await admin.connect()
+    try {
+      await client.query('begin')
+      await client.query('select id from party where id = $1 for update', [partyId])
+      const holder = await client.query<{ pid: number }>('select pg_backend_pid() as pid')
+      const holderPid = holder.rows[0]!.pid
+      let released = false
+      const release = async () => {
+        if (released) {
+          return
+        }
+        released = true
+        await client.query('rollback')
+      }
+      const waitForBlockedJoins = async (count: number) => {
+        const deadline = Date.now() + 5_000
+        while (Date.now() < deadline) {
+          const blocked = await admin.query<{ count: string }>(
+            `select count(*)::text as count
+             from pg_stat_activity
+             where pid <> $1
+               and wait_event_type = 'Lock'
+               and query ilike '%for update of "party"%'`,
+            [holderPid],
+          )
+          if (Number(blocked.rows[0]?.count) >= count) {
+            return
+          }
+          await new Promise((resolve) => {
+            setTimeout(resolve, 10)
+          })
+        }
+        throw new Error(`Timed out waiting for ${count} joins to block on the party lock.`)
+      }
+      try {
+        return await work({ release, waitForBlockedJoins })
+      } finally {
+        await release()
+      }
+    } finally {
+      client.release()
+    }
+  }
+
   function tick(userId: string, roomId: string) {
     return gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
@@ -226,6 +287,14 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     return gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
         return games.currentRoom(userId)
+      }),
+    )
+  }
+
+  function joinParty(userId: string, inviteCode: string) {
+    return gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        return games.joinParty(userId, inviteCode)
       }),
     )
   }
@@ -280,6 +349,83 @@ describeIntegration('GameService.tick lock and race behavior', () => {
       }),
     }
   }
+
+  it('returns the recorded party for a sequential same-invite retry', async () => {
+    const owner = await insertUser('owner')
+    const joiningUser = await insertUser('joining-user')
+    const openParty = await insertOpenParty(owner)
+
+    const joined = await joinParty(joiningUser, openParty.inviteCode)
+    const retried = await joinParty(joiningUser, openParty.inviteCode)
+
+    expect(joined.id).toBe(openParty.id)
+    expect(retried).toEqual(joined)
+    await expect(
+      db
+        .select({ partyId: partyJoin.partyId })
+        .from(partyJoin)
+        .where(eq(partyJoin.userId, joiningUser)),
+    ).resolves.toEqual([{ partyId: openParty.id }])
+  })
+
+  it('converges overlapping same-invite joins after waiting on the party lock', async () => {
+    const owner = await insertUser('owner')
+    const joiningUser = await insertUser('joining-user')
+    const openParty = await insertOpenParty(owner)
+
+    const [first, second] = await withPartyLockBarrier(
+      openParty.id,
+      async ({ release, waitForBlockedJoins }) => {
+        const firstJoin = joinParty(joiningUser, openParty.inviteCode)
+        await waitForBlockedJoins(1)
+        const secondJoin = joinParty(joiningUser, openParty.inviteCode)
+        await waitForBlockedJoins(2)
+        await release()
+        return Promise.all([firstJoin, secondJoin])
+      },
+    )
+
+    expect(first.id).toBe(openParty.id)
+    expect(second).toEqual(first)
+  })
+
+  it('returns the recorded party for a same-code retry from a new runtime', async () => {
+    const owner = await insertUser('owner')
+    const joiningUser = await insertUser('joining-user')
+    const openParty = await insertOpenParty(owner)
+    const joined = await joinParty(joiningUser, openParty.inviteCode)
+    const reloadedRuntime = createGameRuntime(db)
+
+    try {
+      const retried = await reloadedRuntime.runPromise(
+        Effect.flatMap(GameService, (games) => {
+          return games.joinParty(joiningUser, openParty.inviteCode)
+        }),
+      )
+      expect(retried).toEqual(joined)
+    } finally {
+      await reloadedRuntime.dispose()
+    }
+  })
+
+  it('rejects an unrelated cross-party invite for an existing member', async () => {
+    const firstOwner = await insertUser('first-owner')
+    const secondOwner = await insertUser('second-owner')
+    const joiningUser = await insertUser('joining-user')
+    const firstParty = await insertOpenParty(firstOwner)
+    const secondParty = await insertOpenParty(secondOwner)
+
+    await joinParty(joiningUser, firstParty.inviteCode)
+
+    await expect(joinParty(joiningUser, secondParty.inviteCode)).rejects.toMatchObject({
+      code: 'conflict',
+    })
+    const memberships = await db
+      .select({ partyId: partyMember.partyId })
+      .from(partyMember)
+      .where(eq(partyMember.userId, joiningUser))
+    expect(memberships).toEqual([{ partyId: firstParty.id }])
+  })
 
   it('loads and projects a room in one statement without leaking private game state', async () => {
     const host = await insertUser('host')

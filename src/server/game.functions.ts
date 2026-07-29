@@ -109,9 +109,14 @@ export const getGameHistoryFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(({ context }) => {
     return context.gameRuntime.runPromise(
-      Effect.flatMap(GameService, (games) => {
-        return games.history(context.session.user.id)
-      }),
+      Effect.map(
+        Effect.flatMap(GameService, (games) => {
+          return games.history(context.session.user.id)
+        }),
+        (history) => {
+          return { userId: context.session.user.id, history }
+        },
+      ),
     )
   })
 

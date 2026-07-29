@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useRouter } from '@tanstack/react-router'
 import { playableCardImageUrls } from '../card-assets'
 import { warmCardImages, type CardImageSessionCache } from '../card-image-loader'
 import { authClient } from '../lib/auth-client'
@@ -84,6 +85,8 @@ export function GameTable({
   onRoom: (room: RoomView) => void
   onLeave: (leftParty?: boolean) => void
 }) {
+  const navigate = useNavigate()
+  const router = useRouter()
   const [pending, setPending] = useState(false)
   const [pendingRoom, setPendingRoom] = useState<PendingRoomView | null>(null)
   const [error, setError] = useState('')
@@ -415,9 +418,9 @@ export function GameTable({
           )}
         </div>
         <HeaderMenu>
-          <a className="quiet-button" href="/history">
+          <Link className="quiet-button" to="/history">
             Game history
-          </a>
+          </Link>
           <HowToPlay />
           {(singlePlayer || partyGame) && (
             <button
@@ -432,8 +435,9 @@ export function GameTable({
           <button
             className="quiet-button"
             onClick={() => {
-              return void authClient.signOut().then(() => {
-                return window.location.reload()
+              return void authClient.signOut().then(async () => {
+                await navigate({ to: '/sign-in', replace: true })
+                await router.invalidate()
               })
             }}
           >

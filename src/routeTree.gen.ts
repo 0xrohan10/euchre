@@ -9,33 +9,45 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as HistoryRouteImport } from './routes/history'
-import { Route as GamesCodeRouteImport } from './routes/games/$code'
-import { Route as PartnersCodeRouteImport } from './routes/partners/$code'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
+import { Route as AuthenticatedGamesCodeRouteImport } from './routes/_authenticated/games/$code'
+import { Route as AuthenticatedPartnersCodeRouteImport } from './routes/_authenticated/partners/$code'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiTablesRoomIdEventsRouteImport } from './routes/api/tables/$roomId/events'
 
-const IndexRoute = IndexRouteImport.update({
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const HistoryRoute = HistoryRouteImport.update({
+const AuthenticatedHistoryRoute = AuthenticatedHistoryRouteImport.update({
   id: '/history',
   path: '/history',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const GamesCodeRoute = GamesCodeRouteImport.update({
+const AuthenticatedGamesCodeRoute = AuthenticatedGamesCodeRouteImport.update({
   id: '/games/$code',
   path: '/games/$code',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const PartnersCodeRoute = PartnersCodeRouteImport.update({
-  id: '/partners/$code',
-  path: '/partners/$code',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const AuthenticatedPartnersCodeRoute =
+  AuthenticatedPartnersCodeRouteImport.update({
+    id: '/partners/$code',
+    path: '/partners/$code',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -48,27 +60,31 @@ const ApiTablesRoomIdEventsRoute = ApiTablesRoomIdEventsRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/history': typeof HistoryRoute
-  '/games/$code': typeof GamesCodeRoute
-  '/partners/$code': typeof PartnersCodeRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/sign-in': typeof SignInRoute
+  '/history': typeof AuthenticatedHistoryRoute
+  '/games/$code': typeof AuthenticatedGamesCodeRoute
+  '/partners/$code': typeof AuthenticatedPartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/history': typeof HistoryRoute
-  '/games/$code': typeof GamesCodeRoute
-  '/partners/$code': typeof PartnersCodeRoute
+  '/sign-in': typeof SignInRoute
+  '/history': typeof AuthenticatedHistoryRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/games/$code': typeof AuthenticatedGamesCodeRoute
+  '/partners/$code': typeof AuthenticatedPartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/history': typeof HistoryRoute
-  '/games/$code': typeof GamesCodeRoute
-  '/partners/$code': typeof PartnersCodeRoute
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/sign-in': typeof SignInRoute
+  '/_authenticated/history': typeof AuthenticatedHistoryRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/games/$code': typeof AuthenticatedGamesCodeRoute
+  '/_authenticated/partners/$code': typeof AuthenticatedPartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
@@ -76,6 +92,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/sign-in'
     | '/history'
     | '/games/$code'
     | '/partners/$code'
@@ -83,60 +100,75 @@ export interface FileRouteTypes {
     | '/api/tables/$roomId/events'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/sign-in'
     | '/history'
+    | '/'
     | '/games/$code'
     | '/partners/$code'
     | '/api/auth/$'
     | '/api/tables/$roomId/events'
   id:
     | '__root__'
-    | '/'
-    | '/history'
-    | '/games/$code'
-    | '/partners/$code'
+    | '/_authenticated'
+    | '/sign-in'
+    | '/_authenticated/history'
+    | '/_authenticated/'
+    | '/_authenticated/games/$code'
+    | '/_authenticated/partners/$code'
     | '/api/auth/$'
     | '/api/tables/$roomId/events'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  HistoryRoute: typeof HistoryRoute
-  GamesCodeRoute: typeof GamesCodeRoute
-  PartnersCodeRoute: typeof PartnersCodeRoute
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
+  SignInRoute: typeof SignInRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiTablesRoomIdEventsRoute: typeof ApiTablesRoomIdEventsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/history': {
-      id: '/history'
+    '/_authenticated/history': {
+      id: '/_authenticated/history'
       path: '/history'
       fullPath: '/history'
-      preLoaderRoute: typeof HistoryRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedHistoryRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/games/$code': {
-      id: '/games/$code'
+    '/_authenticated/games/$code': {
+      id: '/_authenticated/games/$code'
       path: '/games/$code'
       fullPath: '/games/$code'
-      preLoaderRoute: typeof GamesCodeRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedGamesCodeRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/partners/$code': {
-      id: '/partners/$code'
+    '/_authenticated/partners/$code': {
+      id: '/_authenticated/partners/$code'
       path: '/partners/$code'
       fullPath: '/partners/$code'
-      preLoaderRoute: typeof PartnersCodeRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedPartnersCodeRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/api/auth/$': {
       id: '/api/auth/$'
@@ -155,11 +187,27 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedRouteChildren {
+  AuthenticatedHistoryRoute: typeof AuthenticatedHistoryRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedGamesCodeRoute: typeof AuthenticatedGamesCodeRoute
+  AuthenticatedPartnersCodeRoute: typeof AuthenticatedPartnersCodeRoute
+}
+
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedHistoryRoute: AuthenticatedHistoryRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedGamesCodeRoute: AuthenticatedGamesCodeRoute,
+  AuthenticatedPartnersCodeRoute: AuthenticatedPartnersCodeRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  HistoryRoute: HistoryRoute,
-  GamesCodeRoute: GamesCodeRoute,
-  PartnersCodeRoute: PartnersCodeRoute,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
+  SignInRoute: SignInRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiTablesRoomIdEventsRoute: ApiTablesRoomIdEventsRoute,
 }

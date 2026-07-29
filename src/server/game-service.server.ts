@@ -7,6 +7,7 @@ import {
   gameHistory,
   gameHistoryParticipant,
   party,
+  partyJoin,
   partyMember,
   rematchVote,
   room,
@@ -326,6 +327,26 @@ async function viewParty(userId: string, database: RoomReader): Promise<PartyVie
     .where(eq(partyMember.partyId, record.id))
     .orderBy(partyMember.joinedAt)
   return { id: record.id, ownerUserId: record.ownerUserId, inviteCode: record.inviteCode, members }
+}
+
+async function viewPartyJoin(
+  userId: string,
+  inviteCode: string,
+  database: RoomReader,
+): Promise<PartyView | null> {
+  const [join] = await database
+    .select({ partyId: partyJoin.partyId })
+    .from(partyJoin)
+    .where(and(eq(partyJoin.userId, userId), eq(partyJoin.inviteCode, inviteCode)))
+    .limit(1)
+  if (!join) {
+    return null
+  }
+  const view = await viewParty(userId, database)
+  if (!view || view.id !== join.partyId) {
+    throw new DomainError('conflict', 'You are already in another partnership.')
+  }
+  return view
 }
 
 async function viewRoom(userId: string, roomId: string, database: RoomReader): Promise<RoomView> {
@@ -681,23 +702,35 @@ const createGameService = (
       return Effect.tryPromise({
         try: () => {
           return db.transaction(async (tx) => {
-            const existing = await viewParty(userId, tx)
-            if (existing) {
-              if (existing.inviteCode === inviteCode) {
-                return existing
-              }
-              throw new DomainError(
-                'conflict',
-                'Leave your current partnership before joining another.',
-              )
+            const retry = await viewPartyJoin(userId, inviteCode, tx)
+            if (retry) {
+              return retry
+            }
+            if (await viewParty(userId, tx)) {
+              throw new DomainError('conflict', 'You are already in another partnership.')
+            }
+            const [target] = await tx
+              .select({ id: party.id })
+              .from(party)
+              .where(eq(party.inviteCode, inviteCode))
+              .limit(1)
+            if (!target) {
+              throw new DomainError('not-found', 'Partner invite not found.')
             }
             const [record] = await tx
               .select()
               .from(party)
-              .where(eq(party.inviteCode, inviteCode))
+              .where(eq(party.id, target.id))
               .for('update', { of: party })
               .limit(1)
-            if (!record) {
+            const retryAfterLock = await viewPartyJoin(userId, inviteCode, tx)
+            if (retryAfterLock) {
+              return retryAfterLock
+            }
+            if (await viewParty(userId, tx)) {
+              throw new DomainError('conflict', 'You are already in another partnership.')
+            }
+            if (!record || record.inviteCode !== inviteCode) {
               throw new DomainError('not-found', 'Partner invite not found.')
             }
             const members = await tx
@@ -707,7 +740,19 @@ const createGameService = (
             if (members.length >= 2) {
               throw new DomainError('conflict', 'This partner invite has already been used.')
             }
-            await tx.insert(partyMember).values({ partyId: record.id, userId })
+            const inserted = await tx
+              .insert(partyMember)
+              .values({ partyId: record.id, userId })
+              .onConflictDoNothing()
+              .returning({ partyId: partyMember.partyId })
+            if (inserted.length === 0) {
+              const concurrentRetry = await viewPartyJoin(userId, inviteCode, tx)
+              if (concurrentRetry) {
+                return concurrentRetry
+              }
+              throw new DomainError('conflict', 'You are already in another partnership.')
+            }
+            await tx.insert(partyJoin).values({ userId, inviteCode, partyId: record.id })
             await tx
               .update(party)
               .set({ inviteCode: crypto.randomUUID(), updatedAt: new Date() })
