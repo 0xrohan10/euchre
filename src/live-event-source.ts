@@ -5,6 +5,7 @@ import {
   type LiveSnapshot,
   type LiveTerminal,
 } from './live-events'
+import type { LiveConnectionState } from './interaction-feedback'
 
 const MAX_RETRY_MS = 30_000
 const HIDDEN_ROOM_MAX_RETRY_MS = 5_000
@@ -43,6 +44,7 @@ export type LiveEventSourceOptions<T> = {
   onSnapshot: (snapshot: T) => void
   onTerminal?: (terminal: LiveTerminal) => void
   onFallback?: () => void
+  onConnectionChange?: (state: LiveConnectionState) => void
   environment?: LiveEventSourceEnvironment
 }
 
@@ -128,7 +130,19 @@ export function startLiveEventSource<T>(
   let retryTimer: Timer | undefined
   let transportWatchdogTimer: Timer | undefined
   let snapshotWatchdogTimer: Timer | undefined
+  let staleTimer: Timer | undefined
   let transportWatchdogMs = DEFAULT_TRANSPORT_WATCHDOG_MS
+  let snapshotTrusted = false
+  let connectionState: LiveConnectionState | undefined
+
+  const setConnectionState = (status: LiveConnectionState['status'], trusted = snapshotTrusted) => {
+    snapshotTrusted = trusted
+    if (connectionState?.status === status && connectionState.snapshotTrusted === trusted) {
+      return
+    }
+    connectionState = { status, snapshotTrusted: trusted }
+    options.onConnectionChange?.(connectionState)
+  }
 
   const clearTimer = (timer: Timer | undefined) => {
     if (timer !== undefined) {
@@ -143,6 +157,22 @@ export function startLiveEventSource<T>(
     transportWatchdogTimer = undefined
     clearTimer(snapshotWatchdogTimer)
     snapshotWatchdogTimer = undefined
+  }
+
+  const clearStaleTimer = () => {
+    clearTimer(staleTimer)
+    staleTimer = undefined
+  }
+
+  const markReconnecting = () => {
+    setConnectionState('reconnecting')
+    if (!snapshotTrusted || staleTimer !== undefined || options.scope !== 'room') {
+      return
+    }
+    staleTimer = environment.setTimeout(() => {
+      staleTimer = undefined
+      setConnectionState('stale', false)
+    }, ROOM_SNAPSHOT_WATCHDOG_MS)
   }
 
   const isCurrent = (eventGeneration: number, eventSource: EventSourceLike) => {
@@ -174,6 +204,7 @@ export function startLiveEventSource<T>(
     if (!isCurrent(eventGeneration, eventSource)) {
       return
     }
+    markReconnecting()
     closeSource()
     if (!currentGenerationReceivedSnapshot) {
       if (!hasSuccessfulGeneration && startFallback()) {
@@ -203,6 +234,8 @@ export function startLiveEventSource<T>(
       if (!isCurrent(eventGeneration, eventSource)) {
         return
       }
+      clearStaleTimer()
+      setConnectionState('stale', false)
       closeSource()
       scheduleRetry()
     }, ROOM_SNAPSHOT_WATCHDOG_MS)
@@ -215,6 +248,8 @@ export function startLiveEventSource<T>(
     fallbackStarted = true
     blockedByTerminal = true
     closeSource()
+    clearStaleTimer()
+    setConnectionState('stale', false)
     options.onFallback()
     return true
   }
@@ -223,6 +258,7 @@ export function startLiveEventSource<T>(
     if (!active || blockedByTerminal || !environment.isOnline() || source) {
       return
     }
+    markReconnecting()
     const eventGeneration = generation + 1
     generation = eventGeneration
     currentGenerationReceivedSnapshot = false
@@ -251,6 +287,8 @@ export function startLiveEventSource<T>(
       hasSuccessfulGeneration = true
       postSuccessFailureCount = 0
       failureCount = 0
+      clearStaleTimer()
+      setConnectionState('live', true)
       armTransportWatchdog(eventGeneration, eventSource)
       armSnapshotWatchdog(eventGeneration, eventSource)
       if (payload === lastSnapshotPayload) {
@@ -331,12 +369,14 @@ export function startLiveEventSource<T>(
         reconnect: terminal.reconnect,
       })
       if (terminal.reconnect) {
+        markReconnecting()
         if (terminal.code === 'refresh') {
           failureCount = 0
         }
         scheduleRetry(terminal.code === 'refresh' ? 0 : undefined)
       } else {
         blockedByTerminal = true
+        setConnectionState('stale', false)
       }
     })
     eventSource.addEventListener('error', () => {
@@ -360,6 +400,8 @@ export function startLiveEventSource<T>(
     clearTimer(retryTimer)
     retryTimer = undefined
     closeSource()
+    clearStaleTimer()
+    setConnectionState('stale', false)
   })
   const removeVisibility = environment.addVisibilityListener(() => {
     if (environment.visibilityState() === 'visible' && !source && environment.isOnline()) {
@@ -379,6 +421,7 @@ export function startLiveEventSource<T>(
       generation += 1
       clearTimer(retryTimer)
       retryTimer = undefined
+      clearStaleTimer()
       closeSource()
       removeOnline()
       removeOffline()

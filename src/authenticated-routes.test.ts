@@ -163,6 +163,18 @@ describe('invite execution', () => {
     expect(operation).toHaveBeenCalledTimes(2)
   })
 
+  it('allows the same invite key to recover after a failed execution', async () => {
+    const registry = createInviteExecutionRegistry()
+    const operation = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error('join failed'))
+      .mockResolvedValueOnce('joined')
+
+    await expect(registry.run('navigation-1:room:TABLE1', operation)).rejects.toThrow('join failed')
+    await expect(registry.run('navigation-1:room:TABLE1', operation)).resolves.toBe('joined')
+    expect(operation).toHaveBeenCalledTimes(2)
+  })
+
   it('retries an invite after a provider remount', async () => {
     let currentParty: PartyView | null = null
     const operation = vi.fn(async () => {

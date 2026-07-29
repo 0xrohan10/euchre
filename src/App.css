@@ -79,6 +79,15 @@
   margin: 0;
   color: var(--danger) !important;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
 .join-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -310,6 +319,62 @@
 .room-code:hover,
 .quiet-button:hover {
   background: var(--line);
+}
+.copy-invite {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+.manual-copy {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  width: min(320px, calc(100vw - 32px));
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+  box-shadow: 0 12px 32px hsl(var(--shadow-color) / 0.35);
+}
+.manual-copy input {
+  min-width: 0;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--well);
+  color: var(--text);
+  font-size: 13px;
+}
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.connection-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.connection-status.is-live {
+  color: var(--color-tea-green-300);
+}
+.connection-status.is-reconnecting {
+  color: var(--accent);
+}
+.connection-status.is-stale {
+  color: var(--danger);
 }
 .header-actions {
   grid-column: 3;
@@ -1592,6 +1657,16 @@ button.playing-card.playable:active {
   background: hsl(282.4 48.6% 6.9% / 0.78);
   backdrop-filter: blur(8px);
 }
+.blocking-dialog-layer {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: hsl(282.4 48.6% 6.9% / 0.78);
+  backdrop-filter: blur(8px);
+}
 .settings-panel {
   width: min(440px, 100%);
   overflow: hidden;
@@ -2072,6 +2147,10 @@ button.playing-card.playable:active {
     align-items: end;
     padding: 0;
   }
+  .blocking-dialog-layer {
+    align-items: end;
+    padding: 0;
+  }
   .settings-panel {
     width: 100%;
     max-height: min(680px, 92dvh);
@@ -2190,7 +2269,8 @@ button.playing-card.playable:active {
   .playing-card.dealt,
   .card-back,
   .trick-card,
-  .score-fives {
+  .score-fives,
+  .status-light.your-turn {
     animation: none;
   }
   .exchange-card-out {

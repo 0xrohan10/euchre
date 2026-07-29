@@ -65,6 +65,15 @@ export type PendingRoomView = {
   room: RoomView
 }
 
+export type SubmitCommandResult = RoomView | { status: 'stale'; room: RoomView }
+
+export function normalizeSubmitCommandResult(result: SubmitCommandResult): {
+  status: 'applied' | 'stale'
+  room: RoomView
+} {
+  return result.status === 'stale' ? result : { status: 'applied', room: result }
+}
+
 export type PlayerAction = Extract<
   GameAction,
   | { type: 'exchange-kitty' }

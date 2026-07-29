@@ -1,6 +1,7 @@
-import { desc, eq, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm'
 import type { Database } from '../db/index.server'
 import {
+  activeRoomMembership,
   disconnectVote,
   playerRating,
   rematchVote,
@@ -221,17 +222,22 @@ export async function loadLatestRoomSnapshot(
   database: RoomReader,
   userId: string,
 ): Promise<RoomSnapshot | null> {
-  const latestRoom = database
+  const activeRoom = database
+    .select({ id: activeRoomMembership.roomId })
+    .from(activeRoomMembership)
+    .where(eq(activeRoomMembership.userId, userId))
+    .limit(1)
+  const latestFinishedRoom = database
     .select({ id: roomSeat.roomId })
     .from(roomSeat)
     .innerJoin(room, eq(roomSeat.roomId, room.id))
-    .where(eq(roomSeat.userId, userId))
+    .where(and(eq(roomSeat.userId, userId), eq(room.status, 'finished')))
     .orderBy(desc(room.updatedAt))
     .limit(1)
   const [snapshot] = await database
     .select({ room, ...childSelection(sql`${room.id}`) })
     .from(room)
-    .where(eq(room.id, sql`(${latestRoom})`))
+    .where(eq(room.id, sql`coalesce((${activeRoom}), (${latestFinishedRoom}))`))
     .limit(1)
   if (!snapshot) {
     return null

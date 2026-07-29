@@ -4,7 +4,17 @@ import { useAuthenticatedApp } from './components/AuthenticatedAppProvider'
 import './App.css'
 
 export default function App() {
-  const { session, room, party, loadError, openRoom, setParty, leaveRoom } = useAuthenticatedApp()
+  const {
+    session,
+    room,
+    party,
+    roomConnection,
+    loadError,
+    openRoom,
+    setParty,
+    leaveRoom,
+    signOut,
+  } = useAuthenticatedApp()
 
   if (!room || room.status === 'lobby' || !room.game) {
     return (
@@ -17,9 +27,19 @@ export default function App() {
         onLeave={leaveRoom}
         userId={session.user.id}
         userName={session.user.name}
+        connection={roomConnection}
+        onSignOut={signOut}
       />
     )
   }
 
-  return <GameTable room={room} onRoom={openRoom} onLeave={leaveRoom} />
+  return (
+    <GameTable
+      room={room}
+      connection={roomConnection}
+      onRoom={openRoom}
+      onLeave={leaveRoom}
+      onSignOut={signOut}
+    />
+  )
 }

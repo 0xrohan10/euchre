@@ -1,5 +1,6 @@
 import type { PlayedCard } from '../game/card'
 import { CardFace } from './CardFace'
+import { BlockingDialog } from './BlockingDialog'
 
 export function WonTricksDialog({
   name,
@@ -13,20 +14,12 @@ export function WonTricksDialog({
   onClose: () => void
 }) {
   return (
-    <div
-      className="settings-scrim"
-      onClick={onClose}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          onClose()
-        }
-      }}
-    >
-      <section
+    <div className="settings-scrim">
+      <BlockingDialog
         className="settings-panel won-tricks-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="won-tricks-title"
+        labelledBy="won-tricks-title"
+        onEscape={onClose}
+        onBackdropClick={onClose}
         onClick={(event) => {
           event.stopPropagation()
         }}
@@ -59,7 +52,7 @@ export function WonTricksDialog({
             )
           })}
         </div>
-      </section>
+      </BlockingDialog>
     </div>
   )
 }

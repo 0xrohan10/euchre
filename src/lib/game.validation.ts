@@ -10,6 +10,18 @@ export const GameRulesSchema = Schema.Struct({
   allowFarmersHand: Schema.Boolean,
 })
 
+export const CreateRoomInputSchema = Schema.Struct({
+  operationId: Schema.optionalKey(NonEmptyText),
+  rules: GameRulesSchema,
+})
+
+const CompatibleCreateRoomInputSchema = Schema.Union([CreateRoomInputSchema, GameRulesSchema])
+
+export const RoomCreationInputSchema = Schema.Struct({
+  operationId: NonEmptyText,
+  kind: Schema.Literals(['multiplayer', 'single-player']),
+})
+
 export const RoomIdInputSchema = Schema.Struct({
   roomId: NonEmptyText,
 })
@@ -54,6 +66,7 @@ export const SubmitCommandInputSchema = Schema.Struct({
   commandId: NonEmptyText,
   expectedVersion: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
   action: PlayerCommandActionSchema,
+  responseVersion: Schema.optionalKey(Schema.Literal(2)),
 })
 
 export const VoteForBotInputSchema = Schema.Struct({
@@ -76,6 +89,16 @@ function decode<S extends Schema.ConstraintDecoder<unknown>>(schema: S, fallback
 export const rulesInput = (value: unknown) => {
   return decode(Schema.Struct({ rules: GameRulesSchema }), 'Invalid game rules.')(value).rules
 }
+
+export const createRoomInput = (value: unknown) => {
+  const data = decode(CompatibleCreateRoomInputSchema, 'Invalid room creation request.')(value)
+  if ('rules' in data) {
+    return { ...data, legacy: data.operationId === undefined }
+  }
+  return { rules: data, legacy: true as const }
+}
+
+export const roomCreationInput = decode(RoomCreationInputSchema, 'Invalid room creation operation.')
 
 export const roomIdInput = decode(RoomIdInputSchema, 'Invalid room ID.')
 

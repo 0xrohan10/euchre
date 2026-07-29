@@ -138,6 +138,58 @@ export const room = pgTable(
   },
 )
 
+export const activeRoomMembership = pgTable(
+  'active_room_membership',
+  {
+    userId: text('user_id')
+      .primaryKey()
+      .references(
+        () => {
+          return user.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    roomId: uuid('room_id')
+      .notNull()
+      .references(
+        () => {
+          return room.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => {
+    return [index('active_room_membership_room_id_idx').on(table.roomId)]
+  },
+)
+
+export const roomCreation = pgTable(
+  'room_creation',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(
+        () => {
+          return user.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    operationId: uuid('operation_id').notNull(),
+    operationKind: varchar('operation_kind', { length: 24 })
+      .$type<'multiplayer' | 'single-player'>()
+      .notNull(),
+    roomId: uuid('room_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => {
+    return [
+      primaryKey({ columns: [table.userId, table.operationId] }),
+      index('room_creation_room_id_idx').on(table.roomId),
+    ]
+  },
+)
+
 export const gameHistory = pgTable(
   'game_history',
   {

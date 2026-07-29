@@ -63,6 +63,10 @@ describe('startLiveEventSource', () => {
       scope?: 'lobby' | 'room'
       onFallback?: () => void
       onTerminal?: (terminal: { code: string }) => void
+      onConnectionChange?: (state: {
+        status: 'live' | 'reconnecting' | 'stale'
+        snapshotTrusted: boolean
+      }) => void
     } = {},
   ) {
     const add = (listeners: Array<() => void>, listener: () => void) => {
@@ -80,6 +84,7 @@ describe('startLiveEventSource', () => {
       onSnapshot,
       onFallback: options.onFallback,
       onTerminal: options.onTerminal,
+      onConnectionChange: options.onConnectionChange,
       environment: {
         createEventSource: (url) => {
           sourceUrls.push(url)
@@ -174,6 +179,34 @@ describe('startLiveEventSource', () => {
     }
     expect(sources).toHaveLength(2)
 
+    manager.stop()
+  })
+
+  it('reports live, trusted reconnecting, and stale room snapshots', async () => {
+    const onConnectionChange = vi.fn()
+    const { manager } = start(vi.fn(), { scope: 'room', onConnectionChange })
+    expect(onConnectionChange).toHaveBeenLastCalledWith({
+      status: 'reconnecting',
+      snapshotTrusted: false,
+    })
+
+    sources[0].emit('snapshot', { scope: 'room', snapshot: { value: 1 } })
+    expect(onConnectionChange).toHaveBeenLastCalledWith({
+      status: 'live',
+      snapshotTrusted: true,
+    })
+
+    sources[0].emit('error')
+    expect(onConnectionChange).toHaveBeenLastCalledWith({
+      status: 'reconnecting',
+      snapshotTrusted: true,
+    })
+
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(onConnectionChange).toHaveBeenLastCalledWith({
+      status: 'stale',
+      snapshotTrusted: false,
+    })
     manager.stop()
   })
 
