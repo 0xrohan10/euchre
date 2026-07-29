@@ -1,0 +1,11 @@
+Asset: Inter variable and static upright WOFF2 files
+Version: 4.1
+Copyright: Copyright (c) 2016 The Inter Project Authors
+License: SIL Open Font License 1.1 (Inter-OFL-1.1.txt)
+Release: https://github.com/rsms/inter/releases/tag/v4.1
+Source: https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+Archive-Paths: web/InterVariable.woff2 and web/Inter-{Thin,ExtraLight,Light,Regular,Medium,SemiBold,Bold,ExtraBold,Black}.woff2
+Archive-SHA-256: 9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e
+Variable-Font-SHA-256: 693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3
+Modifications: None; files are copied unchanged from the release archive.
+Verification: The SHA-256 of every vendored WOFF2 is pinned by scripts/verify-card-assets.mjs.
