@@ -15,6 +15,8 @@ export function createDb() {
     max: 5,
     maxUses: 1,
     connectionTimeoutMillis: 5_000,
+    statement_timeout: 8_000,
+    query_timeout: 8_000,
     idleTimeoutMillis: 1_000,
     allowExitOnIdle: true,
   })

@@ -10,13 +10,19 @@ import {
   type ReactNode,
 } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { isCurrentRoomStreamEvent } from '../authenticated-app-state'
+import {
+  isCurrentLobbyStreamEvent,
+  isCurrentRoomStreamEvent,
+  shouldInvalidateLobbyEpoch,
+} from '../authenticated-app-state'
 import {
   createInviteExecutionRegistry,
   type AuthenticatedBootstrap,
   type InviteExecutionRegistry,
 } from '../authenticated-routes'
 import { acceptRoomUpdate, type PartyView, type RoomView } from '../multiplayer'
+import { getPageConnectionIdentity, startLiveEventSource } from '../live-event-source'
+import { startLobbyLiveTransport } from '../lobby-live-transport'
 import { getCurrentPartyFn, getWaitingLobbyFn } from '../server/game.functions'
 import { startWaitingLobbyPolling } from '../waiting-lobby-polling'
 
@@ -47,7 +53,8 @@ export function AuthenticatedAppProvider({
   const [room, setRoomState] = useState(bootstrap.room)
   const [party, setPartyStateValue] = useState(bootstrap.party)
   const [loadError, setLoadError] = useState('')
-  const lobbyPollGenerationRef = useRef(0)
+  const lobbyEpochRef = useRef(0)
+  const partyIdRef = useRef(bootstrap.party?.id ?? null)
   const roomTransitionGenerationRef = useRef(0)
   const inviteRegistryRef = useRef<InviteExecutionRegistry | null>(null)
   const activeRoomIdRef = useRef<string | null>(bootstrap.room?.id ?? null)
@@ -68,6 +75,7 @@ export function AuthenticatedAppProvider({
 
   const openRoom = useCallback(
     async (next: RoomView) => {
+      lobbyEpochRef.current += 1
       if (activeRoomIdRef.current === next.id) {
         setRoom(next)
         return
@@ -92,14 +100,17 @@ export function AuthenticatedAppProvider({
   )
 
   const setParty = useCallback((next: PartyView | null) => {
-    if (next === null) {
-      lobbyPollGenerationRef.current += 1
+    const nextPartyId = next?.id ?? null
+    if (shouldInvalidateLobbyEpoch(partyIdRef.current, nextPartyId)) {
+      lobbyEpochRef.current += 1
     }
+    partyIdRef.current = nextPartyId
     setPartyStateValue(next)
   }, [])
 
   const leaveRoom = useCallback(
     (leftParty = false) => {
+      lobbyEpochRef.current += 1
       roomTransitionGenerationRef.current += 1
       activeRoomIdRef.current = null
       setRoomState(null)
@@ -113,26 +124,28 @@ export function AuthenticatedAppProvider({
 
   const roomId = room?.id
   const partyId = party?.id
-  const sessionUserId = bootstrap.session.user.id
-
   useEffect(() => {
     if (!partyId || roomId) {
       return
     }
-    const generation = lobbyPollGenerationRef.current
-    const polling = startWaitingLobbyPolling({
-      load: () => {
-        return getWaitingLobbyFn()
-      },
-      apply: ({ party: nextParty, room: nextRoom }) => {
-        setParty(nextParty)
-        if (nextRoom) {
-          openRoom(nextRoom)
-        }
-      },
-      isCurrent: () => {
-        return lobbyPollGenerationRef.current === generation
-      },
+    const epoch = lobbyEpochRef.current
+    const applySnapshot = ({
+      party: nextParty,
+      room: nextRoom,
+    }: {
+      party: PartyView | null
+      room: RoomView | null
+    }) => {
+      if (!isCurrentLobbyStreamEvent(epoch, lobbyEpochRef.current)) {
+        return
+      }
+      setPartyStateValue(nextParty)
+      partyIdRef.current = nextParty?.id ?? null
+      if (nextRoom) {
+        void openRoom(nextRoom)
+      }
+    }
+    const transport = startLobbyLiveTransport({
       getVisibilityState: () => {
         return document.visibilityState
       },
@@ -142,18 +155,39 @@ export function AuthenticatedAppProvider({
           document.removeEventListener('visibilitychange', listener)
         }
       },
-      setTimeout: (callback, delayMs) => {
-        return globalThis.setTimeout(callback, delayMs)
+      startEvents: (onFallback) => {
+        return startLiveEventSource<{ party: PartyView | null; room: RoomView | null }>({
+          url: `/api/lobby/events?page=${encodeURIComponent(getPageConnectionIdentity())}`,
+          scope: 'lobby',
+          onSnapshot: applySnapshot,
+          onFallback,
+        })
       },
-      clearTimeout: (timer) => {
-        globalThis.clearTimeout(timer)
+      startPolling: () => {
+        return startWaitingLobbyPolling({
+          load: getWaitingLobbyFn,
+          apply: applySnapshot,
+          isCurrent: () => {
+            return isCurrentLobbyStreamEvent(epoch, lobbyEpochRef.current)
+          },
+          getVisibilityState: () => {
+            return document.visibilityState
+          },
+          addVisibilityListener: () => {
+            return () => {}
+          },
+          setTimeout: globalThis.setTimeout,
+          clearTimeout: globalThis.clearTimeout,
+        })
       },
     })
     return () => {
-      lobbyPollGenerationRef.current += 1
-      polling.stop()
+      if (isCurrentLobbyStreamEvent(epoch, lobbyEpochRef.current)) {
+        lobbyEpochRef.current += 1
+      }
+      transport.stop()
     }
-  }, [openRoom, partyId, roomId, setParty, sessionUserId])
+  }, [openRoom, partyId, roomId])
 
   const handleRoomGone = useEffectEvent(() => {
     roomTransitionGenerationRef.current += 1
@@ -169,29 +203,27 @@ export function AuthenticatedAppProvider({
     if (!roomId) {
       return
     }
-    let events: EventSource | undefined
-    const timer = window.setTimeout(() => {
-      const storageKey = 'euchre:event-stream-id'
-      const streamId = window.sessionStorage.getItem(storageKey) ?? crypto.randomUUID()
-      window.sessionStorage.setItem(storageKey, streamId)
-      events = new EventSource(`/api/tables/${roomId}/events?stream=${streamId}`)
-      events.addEventListener('room', (event) => {
-        const nextRoom = JSON.parse((event as MessageEvent<string>).data) as RoomView
+    const events = startLiveEventSource<RoomView>({
+      url: `/api/tables/${encodeURIComponent(roomId)}/events?page=${encodeURIComponent(getPageConnectionIdentity())}`,
+      scope: 'room',
+      onSnapshot: (nextRoom) => {
         if (!isCurrentRoomStreamEvent(roomId, activeRoomIdRef.current, nextRoom.id)) {
           return
         }
         setRoom(nextRoom)
-      })
-      events.addEventListener('gone', () => {
+      },
+      onTerminal: ({ code }) => {
+        if (code !== 'not-found' && code !== 'forbidden') {
+          return
+        }
         if (!isCurrentRoomStreamEvent(roomId, activeRoomIdRef.current)) {
           return
         }
         handleRoomGone()
-      })
-    }, 100)
+      },
+    })
     return () => {
-      window.clearTimeout(timer)
-      events?.close()
+      events.stop()
     }
   }, [roomId, setRoom])
 

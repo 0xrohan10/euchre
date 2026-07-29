@@ -132,7 +132,12 @@ export function startWaitingLobbyPolling<T>(
   }
 
   const removeVisibilityListener = options.addVisibilityListener(onVisibilityChange)
-  void runRefresh()
+  if (options.getVisibilityState() === 'hidden') {
+    hiddenAt = now()
+    scheduleAt(hiddenAt + hiddenIntervalMs)
+  } else {
+    void runRefresh()
+  }
 
   return {
     stop() {

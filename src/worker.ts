@@ -64,3 +64,4 @@ export default {
 } satisfies ExportedHandler<Env, RatingQueueMessage>
 
 export { isRatingQueueMessage, processRatingQueueMessages }
+export { LiveStreamAdmissionGate } from './server/live-stream-admission-do.server'

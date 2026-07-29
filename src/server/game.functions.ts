@@ -95,6 +95,8 @@ export const getCurrentRoomFn = createServerFn({ method: 'GET' })
     )
   })
 
+// Rollback compatibility for clients that cannot establish the lobby EventSource. Remove only
+// after the live-event transport has been stable for a full release.
 export const getWaitingLobbyFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(({ context }) => {

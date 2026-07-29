@@ -11,7 +11,9 @@ import {
 import {
   authenticatedProviderKey,
   bootstrapForSession,
+  isCurrentLobbyStreamEvent,
   isCurrentRoomStreamEvent,
+  shouldInvalidateLobbyEpoch,
 } from './authenticated-app-state'
 import { createDeck } from './game/card'
 import { createGame } from './game/deal'
@@ -198,6 +200,36 @@ describe('authenticated provider scope', () => {
     expect(isCurrentRoomStreamEvent('room-a', 'room-b', 'room-a')).toBe(false)
     expect(isCurrentRoomStreamEvent('room-a', 'room-b', 'room-b')).toBe(false)
     expect(isCurrentRoomStreamEvent('room-b', 'room-b', 'room-b')).toBe(true)
+  })
+
+  it('rejects an old lobby snapshot after a local leave commits', () => {
+    let lobbyEpoch = 4
+    const effectEpoch = lobbyEpoch
+    let currentParty: PartyView | null = party
+    const applyOldSnapshot = (nextParty: PartyView | null) => {
+      if (isCurrentLobbyStreamEvent(effectEpoch, lobbyEpoch)) {
+        currentParty = nextParty
+      }
+    }
+
+    lobbyEpoch += 1
+    currentParty = null
+    applyOldSnapshot(party)
+
+    expect(currentParty).toBeNull()
+  })
+
+  it('keeps the mounted lobby generation valid for a same-party room assignment', () => {
+    let lobbyEpoch = 4
+    const effectEpoch = lobbyEpoch
+    const nextParty = { ...party, members: [...party.members] }
+    if (shouldInvalidateLobbyEpoch(party.id, nextParty.id)) {
+      lobbyEpoch += 1
+    }
+
+    const assignedRoom = isCurrentLobbyStreamEvent(effectEpoch, lobbyEpoch) ? room : null
+
+    expect(assignedRoom).toBe(room)
   })
 })
 

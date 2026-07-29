@@ -123,6 +123,18 @@ describe('startWaitingLobbyPolling', () => {
     polling.stop()
   })
 
+  it('waits for the hidden cadence before its first refresh when started hidden', async () => {
+    visibility = 'hidden'
+    const polling = start()
+
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(load).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(load).toHaveBeenCalledOnce()
+
+    polling.stop()
+  })
+
   it('recovers after a rejected refresh', async () => {
     load.mockRejectedValueOnce(new Error('network'))
     const polling = start()

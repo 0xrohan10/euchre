@@ -16,6 +16,7 @@ import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedGamesCodeRouteImport } from './routes/_authenticated/games/$code'
 import { Route as AuthenticatedPartnersCodeRouteImport } from './routes/_authenticated/partners/$code'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiLobbyEventsRouteImport } from './routes/api/lobby/events'
 import { Route as ApiTablesRoomIdEventsRouteImport } from './routes/api/tables/$roomId/events'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
@@ -53,6 +54,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiLobbyEventsRoute = ApiLobbyEventsRouteImport.update({
+  id: '/api/lobby/events',
+  path: '/api/lobby/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTablesRoomIdEventsRoute = ApiTablesRoomIdEventsRouteImport.update({
   id: '/api/tables/$roomId/events',
   path: '/api/tables/$roomId/events',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/games/$code': typeof AuthenticatedGamesCodeRoute
   '/partners/$code': typeof AuthenticatedPartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/lobby/events': typeof ApiLobbyEventsRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
 export interface FileRoutesByTo {
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/games/$code': typeof AuthenticatedGamesCodeRoute
   '/partners/$code': typeof AuthenticatedPartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/lobby/events': typeof ApiLobbyEventsRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
 export interface FileRoutesById {
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/_authenticated/games/$code': typeof AuthenticatedGamesCodeRoute
   '/_authenticated/partners/$code': typeof AuthenticatedPartnersCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/lobby/events': typeof ApiLobbyEventsRoute
   '/api/tables/$roomId/events': typeof ApiTablesRoomIdEventsRoute
 }
 export interface FileRouteTypes {
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/games/$code'
     | '/partners/$code'
     | '/api/auth/$'
+    | '/api/lobby/events'
     | '/api/tables/$roomId/events'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/games/$code'
     | '/partners/$code'
     | '/api/auth/$'
+    | '/api/lobby/events'
     | '/api/tables/$roomId/events'
   id:
     | '__root__'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/_authenticated/games/$code'
     | '/_authenticated/partners/$code'
     | '/api/auth/$'
+    | '/api/lobby/events'
     | '/api/tables/$roomId/events'
   fileRoutesById: FileRoutesById
 }
@@ -123,6 +135,7 @@ export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   SignInRoute: typeof SignInRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiLobbyEventsRoute: typeof ApiLobbyEventsRoute
   ApiTablesRoomIdEventsRoute: typeof ApiTablesRoomIdEventsRoute
 }
 
@@ -177,6 +190,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/lobby/events': {
+      id: '/api/lobby/events'
+      path: '/api/lobby/events'
+      fullPath: '/api/lobby/events'
+      preLoaderRoute: typeof ApiLobbyEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/tables/$roomId/events': {
       id: '/api/tables/$roomId/events'
       path: '/api/tables/$roomId/events'
@@ -209,6 +229,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   SignInRoute: SignInRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiLobbyEventsRoute: ApiLobbyEventsRoute,
   ApiTablesRoomIdEventsRoute: ApiTablesRoomIdEventsRoute,
 }
 export const routeTree = rootRouteImport

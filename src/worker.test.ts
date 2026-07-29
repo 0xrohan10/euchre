@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { isRatingQueueMessage, processRatingQueueMessages } from './worker'
 
+vi.mock('cloudflare:workers', () => {
+  return { env: {}, DurableObject: class {} }
+})
+
 const validBody = { gameHistoryId: '0198fd3c-5ef0-7a08-9fd1-16dd758b2833' }
 
 describe('rating queue payloads', () => {

@@ -13,6 +13,20 @@
       "id": "29d914fb9e6f4cd0acd5a2239dd9d247",
     },
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LIVE_STREAM_ADMISSION",
+        "class_name": "LiveStreamAdmissionGate",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LiveStreamAdmissionGate"],
+    },
+  ],
   "queues": {
     "producers": [
       {
