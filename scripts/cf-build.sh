@@ -18,6 +18,7 @@ if [[ "${WORKERS_CI:-}" != "1" || "${WORKERS_CI_BRANCH:-}" == "${PRODUCTION_BRAN
   bun run db:migrate
 else
   echo "Skipping migrations on non-production branch ${WORKERS_CI_BRANCH}"
+  bun scripts/prepare-preview-wrangler.mjs
 fi
 
 bun run build
