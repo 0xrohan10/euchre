@@ -4,11 +4,12 @@ export const LIVE_ADMISSION_MAX_LEASES = 3
 export const LIVE_ADMISSION_TTL_MS = 45_000
 
 type Lease = {
+  userId: string
   scope: LiveEventScope
   pageId: string
   leaseId: string
   expiresAt: number
-  status: 'active' | 'replaced'
+  status: 'active' | 'transferred' | 'replaced'
 }
 
 export type AdmissionStorage = {
@@ -41,6 +42,7 @@ export class LiveStreamAdmissionState {
     pageId: string,
     leaseId: string,
     now: number,
+    userId = 'test-user',
   ): { active: boolean; replaced: string[] } {
     this.prune(now)
     const scoped = this.leases.filter((lease) => {
@@ -58,6 +60,7 @@ export class LiveStreamAdmissionState {
       }
     }
     this.leases.push({
+      userId,
       scope,
       pageId,
       leaseId,
@@ -67,7 +70,55 @@ export class LiveStreamAdmissionState {
     return { active: true, replaced }
   }
 
-  renew(leaseId: string, now: number): 'active' | 'expired' | 'replaced' {
+  transfer(userId: string, scope: LiveEventScope, pageId: string, leaseId: string, now: number) {
+    this.prune(now)
+    const lease = this.leases.find((candidate) => {
+      return candidate.leaseId === leaseId
+    })
+    if (
+      !lease ||
+      lease.status !== 'active' ||
+      lease.userId !== userId ||
+      lease.scope !== scope ||
+      lease.pageId !== pageId
+    ) {
+      return false
+    }
+    lease.status = 'transferred'
+    lease.expiresAt = now + LIVE_ADMISSION_TTL_MS
+    return true
+  }
+
+  returnTransfer(
+    userId: string,
+    scope: LiveEventScope,
+    pageId: string,
+    leaseId: string,
+    now: number,
+  ) {
+    this.prune(now)
+    const lease = this.leases.find((candidate) => {
+      return candidate.leaseId === leaseId
+    })
+    if (
+      !lease ||
+      lease.status !== 'transferred' ||
+      lease.userId !== userId ||
+      lease.scope !== scope ||
+      lease.pageId !== pageId
+    ) {
+      return false
+    }
+    lease.status = 'active'
+    lease.expiresAt = now + LIVE_ADMISSION_TTL_MS
+    return true
+  }
+
+  renew(
+    leaseId: string,
+    now: number,
+    capability?: { userId: string; scope: LiveEventScope; pageId: string },
+  ): 'active' | 'expired' | 'replaced' {
     this.prune(now)
     const lease = this.leases.find((candidate) => {
       return candidate.leaseId === leaseId
@@ -78,16 +129,39 @@ export class LiveStreamAdmissionState {
     if (lease.status === 'replaced') {
       return 'replaced'
     }
+    if (
+      lease.status === 'transferred' &&
+      (!capability ||
+        lease.userId !== capability.userId ||
+        lease.scope !== capability.scope ||
+        lease.pageId !== capability.pageId)
+    ) {
+      return 'expired'
+    }
     lease.expiresAt = now + LIVE_ADMISSION_TTL_MS
     return 'active'
   }
 
-  release(leaseId: string, now: number): boolean {
+  release(
+    leaseId: string,
+    now: number,
+    capability?: { userId: string; scope: LiveEventScope; pageId: string },
+  ): boolean {
     this.prune(now)
     const index = this.leases.findIndex((lease) => {
       return lease.leaseId === leaseId
     })
     if (index < 0) {
+      return false
+    }
+    const lease = this.leases[index]
+    if (
+      lease.status === 'transferred' &&
+      (!capability ||
+        lease.userId !== capability.userId ||
+        lease.scope !== capability.scope ||
+        lease.pageId !== capability.pageId)
+    ) {
       return false
     }
     this.leases.splice(index, 1)
@@ -133,20 +207,64 @@ export async function handleLiveStreamAdmissionRequest(
   const state = new LiveStreamAdmissionState((await storage.get<Lease[]>(STORAGE_KEY)) ?? [])
   const action = new URL(request.url).pathname
   if (action === '/acquire') {
-    if (!('scope' in body) || !('pageId' in body) || !isScope(body.scope)) {
+    if (!('scope' in body) || !('pageId' in body) || !('userId' in body) || !isScope(body.scope)) {
       return new Response('Invalid admission request', { status: 400 })
     }
-    if (typeof body.pageId !== 'string' || !UUID_PATTERN.test(body.pageId)) {
+    if (
+      typeof body.pageId !== 'string' ||
+      !UUID_PATTERN.test(body.pageId) ||
+      typeof body.userId !== 'string' ||
+      body.userId.length === 0
+    ) {
       return new Response('Invalid admission request', { status: 400 })
     }
-    const result = state.acquire(body.scope, body.pageId, leaseId, now)
+    const result = state.acquire(body.scope, body.pageId, leaseId, now, body.userId)
     await persist(storage, state)
     return Response.json(result.active ? { ...result, leaseId } : result, {
       status: result.active ? 200 : 429,
     })
   }
+  if (action === '/transfer') {
+    if (
+      !('scope' in body) ||
+      !('pageId' in body) ||
+      !('userId' in body) ||
+      !isScope(body.scope) ||
+      typeof body.pageId !== 'string' ||
+      typeof body.userId !== 'string'
+    ) {
+      return new Response('Invalid admission request', { status: 400 })
+    }
+    const transferred = state.transfer(body.userId, body.scope, body.pageId, leaseId, now)
+    await persist(storage, state)
+    return new Response(null, { status: transferred ? 204 : 409 })
+  }
+  if (action === '/return') {
+    if (
+      !('scope' in body) ||
+      !('pageId' in body) ||
+      !('userId' in body) ||
+      !isScope(body.scope) ||
+      typeof body.pageId !== 'string' ||
+      typeof body.userId !== 'string'
+    ) {
+      return new Response('Invalid admission request', { status: 400 })
+    }
+    const returned = state.returnTransfer(body.userId, body.scope, body.pageId, leaseId, now)
+    await persist(storage, state)
+    return new Response(null, { status: returned ? 204 : 409 })
+  }
   if (action === '/renew') {
-    const status = state.renew(leaseId, now)
+    const capability =
+      'userId' in body &&
+      'scope' in body &&
+      'pageId' in body &&
+      typeof body.userId === 'string' &&
+      isScope(body.scope) &&
+      typeof body.pageId === 'string'
+        ? { userId: body.userId, scope: body.scope, pageId: body.pageId }
+        : undefined
+    const status = state.renew(leaseId, now, capability)
     await persist(storage, state)
     return Response.json(
       { status },
@@ -154,7 +272,16 @@ export async function handleLiveStreamAdmissionRequest(
     )
   }
   if (action === '/release') {
-    state.release(leaseId, now)
+    const capability =
+      'userId' in body &&
+      'scope' in body &&
+      'pageId' in body &&
+      typeof body.userId === 'string' &&
+      isScope(body.scope) &&
+      typeof body.pageId === 'string'
+        ? { userId: body.userId, scope: body.scope, pageId: body.pageId }
+        : undefined
+    state.release(leaseId, now, capability)
     await persist(storage, state)
     return new Response(null, { status: 204 })
   }

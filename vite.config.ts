@@ -51,6 +51,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       fileParallelism: process.env.RUN_DB_INTEGRATION !== '1',
+      exclude: ['**/*.workerd.test.ts', '**/node_modules/**'],
     },
   }
 })

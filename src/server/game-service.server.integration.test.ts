@@ -8,6 +8,7 @@ import {
   partyJoin,
   partyMember,
   room,
+  roomSchedulerLease,
   roomSeat,
   user,
 } from '../db/schema'
@@ -16,6 +17,7 @@ import { createGame } from '../game/deal'
 import { createDeck } from '../game/card'
 import type { PlayerAction } from '../multiplayer'
 import { createGameRuntime, GameService } from './game-service.server'
+import { acquireRoomScheduler } from './room-scheduler-lease.server'
 import { Effect } from 'effect'
 
 const runIntegration = process.env.RUN_DB_INTEGRATION === '1'
@@ -60,6 +62,61 @@ describeIntegration('GameService.tick lock and race behavior', () => {
   afterAll(async () => {
     await gameRuntime.dispose()
     await admin.end()
+  })
+
+  it('fences a stalled coordinator after an expired lease hands over to legacy', async () => {
+    const host = await insertUser('epoch-host')
+    const partner = await insertUser('epoch-partner')
+    const roomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date('2026-07-30T12:00:00Z'),
+    })
+    const coordinatorOwner = crypto.randomUUID()
+    const seededLease = (
+      await db
+        .select({ expiresAt: roomSchedulerLease.expiresAt })
+        .from(roomSchedulerLease)
+        .where(eq(roomSchedulerLease.roomId, roomId))
+    )[0]!
+    const coordinatorAt = new Date(seededLease.expiresAt.getTime() + 1)
+    const acquired = await db.transaction((tx) => {
+      return acquireRoomScheduler(tx, roomId, 'coordinator', coordinatorOwner, coordinatorAt, 1_000)
+    })
+    expect(acquired).not.toBeNull()
+
+    const legacy = await db.transaction((tx) => {
+      return acquireRoomScheduler(
+        tx,
+        roomId,
+        'legacy',
+        '00000000-0000-4000-8000-000000000001',
+        new Date(coordinatorAt.getTime() + 2_000),
+      )
+    })
+    expect(legacy?.epoch).toBe((acquired?.epoch ?? 0) + 1)
+
+    const wrote = await db.transaction(async (tx) => {
+      const resumed = await acquireRoomScheduler(
+        tx,
+        roomId,
+        'coordinator',
+        coordinatorOwner,
+        new Date(coordinatorAt.getTime() + 20_000),
+        15_000,
+        acquired!.epoch,
+      )
+      if (!resumed) {
+        return false
+      }
+      await tx.update(room).set({ status: 'paused' }).where(eq(room.id, roomId))
+      return true
+    })
+
+    expect(wrote).toBe(false)
+    expect(
+      (await db.select({ status: room.status }).from(room).where(eq(room.id, roomId)))[0],
+    ).toEqual({ status: 'playing' })
   })
 
   async function insertUser(label: string) {
@@ -339,10 +396,10 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     }
   }
 
-  function tick(userId: string, roomId: string) {
+  function tick(userId: string, roomId: string, options?: { heartbeat?: boolean }) {
     return gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
-        return games.tick(userId, roomId)
+        return games.tick(userId, roomId, options)
       }),
     )
   }
@@ -1367,6 +1424,21 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     expect(statements[1]).toMatch(/for update of "room"/i)
     expect(view.version).toBe(1)
     expect(view.seats[2].connected).toBe(false)
+  })
+
+  it('runs caller-independent reconciliation without renewing the selected user', async () => {
+    const host = await insertUser('host')
+    const partner = await insertUser('partner')
+    const roomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(Date.now() - 15_000),
+    })
+
+    const view = await tick(host, roomId, { heartbeat: false })
+
+    expect(view.version).toBe(1)
+    expect(view.seats[0].connected).toBe(false)
   })
 
   it('sees a duplicate command that commits while the retry waits for the room lock', async () => {

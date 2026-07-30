@@ -158,6 +158,63 @@ describe('live event handlers', () => {
     expect(openLobby).not.toHaveBeenCalled()
   })
 
+  it('rejects random room identifiers before admission or Durable Object work', async () => {
+    const acquireAdmission = vi.fn()
+    const openRoom = vi.fn()
+    const authorizeRoom = vi.fn()
+    const handlers = createLiveEventHandlers({
+      authenticate: async () => {
+        return 'session-user'
+      },
+      userId: (context: string) => {
+        return context
+      },
+      openLobby: vi.fn(),
+      openRoom,
+      acquireAdmission,
+      authorizeRoom,
+    })
+
+    const response = await handlers.room(
+      new Request(`https://example.test/api/tables/random/events?page=${PAGE_A}`),
+      'random',
+    )
+
+    expect(response.status).toBe(400)
+    expect(authorizeRoom).not.toHaveBeenCalled()
+    expect(acquireAdmission).not.toHaveBeenCalled()
+    expect(openRoom).not.toHaveBeenCalled()
+  })
+
+  it('checks authenticated seat membership before admission', async () => {
+    const acquireAdmission = vi.fn()
+    const openRoom = vi.fn()
+    const roomId = '0198fd3c-5ef0-7a08-9fd1-16dd758b2800'
+    const handlers = createLiveEventHandlers({
+      authenticate: async () => {
+        return 'session-user'
+      },
+      userId: (context: string) => {
+        return context
+      },
+      openLobby: vi.fn(),
+      openRoom,
+      acquireAdmission,
+      authorizeRoom: async () => {
+        return false
+      },
+    })
+
+    const response = await handlers.room(
+      new Request(`https://example.test/api/tables/${roomId}/events?page=${PAGE_A}`),
+      roomId,
+    )
+
+    expect(response.status).toBe(404)
+    expect(acquireAdmission).not.toHaveBeenCalled()
+    expect(openRoom).not.toHaveBeenCalled()
+  })
+
   it('does not open stream resources when the global gate is full', async () => {
     const openLobby = vi.fn()
     const handlers = createLiveEventHandlers({
@@ -518,6 +575,206 @@ describe('live event handlers', () => {
       expect(firstFrame).not.toContain(`"${privateField}"`)
       expect(secondFrame).not.toContain(`"${privateField}"`)
     }
+  })
+
+  it('uses a returned admission capability for read-only selected-room fallback', async () => {
+    const renew = vi.fn(async () => {
+      return 'active' as const
+    })
+    const release = vi.fn(async () => {})
+    const openRoom = vi.fn()
+    const openRoomReadOnly = vi.fn(() => {
+      return {
+        loadSnapshot: async () => {
+          return roomFor('session-user', 0)
+        },
+        dispose: vi.fn(),
+      }
+    })
+    const handlers = createLiveEventHandlers({
+      authenticate: async () => {
+        return 'session-user'
+      },
+      userId: (context: string) => {
+        return context
+      },
+      openLobby: vi.fn(),
+      openRoom,
+      openRoomReadOnly,
+      acquireAdmission: async () => {
+        return { leaseId: PAGE_A, renew, releaseOnce: release, release }
+      },
+      roomCoordinatorSelection: () => {
+        return 'coordinator'
+      },
+      connectRoomCoordinator: async () => {
+        return new Response(null, {
+          status: 503,
+          headers: { 'x-room-coordinator-admission': 'returned' },
+        })
+      },
+    })
+
+    const response = await handlers.room(
+      new Request(`https://example.test/api/tables/room-1/events?page=${PAGE_A}`),
+      'room-1',
+    )
+    const reader = response.body!.getReader()
+    const frames = [decoder.decode((await reader.read()).value)]
+    await vi.advanceTimersByTimeAsync(0)
+    frames.push(decoder.decode((await reader.read()).value))
+    frames.push(decoder.decode((await reader.read()).value))
+    frames.push(decoder.decode((await reader.read()).value))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(openRoom).not.toHaveBeenCalled()
+    expect(openRoomReadOnly).toHaveBeenCalledOnce()
+    expect(frames.join('')).toContain('"code":"refresh"')
+    expect(renew).not.toHaveBeenCalled()
+    expect(release).toHaveBeenCalledOnce()
+  })
+
+  it('acquires a fresh lease when the coordinator releases a failed transfer', async () => {
+    const oldRelease = vi.fn(async () => {})
+    const freshRenew = vi.fn(async () => {
+      return 'active' as const
+    })
+    const freshRelease = vi.fn(async () => {})
+    const acquireAdmission = vi
+      .fn()
+      .mockResolvedValueOnce({
+        leaseId: PAGE_A,
+        renew: vi.fn(),
+        releaseOnce: oldRelease,
+        release: oldRelease,
+      })
+      .mockResolvedValueOnce({
+        leaseId: PAGE_B,
+        renew: freshRenew,
+        releaseOnce: freshRelease,
+        release: freshRelease,
+      })
+    const handlers = createLiveEventHandlers({
+      authenticate: async () => {
+        return 'session-user'
+      },
+      userId: (context: string) => {
+        return context
+      },
+      openLobby: vi.fn(),
+      openRoom: vi.fn(),
+      openRoomReadOnly: () => {
+        return {
+          loadSnapshot: async () => {
+            return roomFor('session-user', 0)
+          },
+          dispose: vi.fn(),
+        }
+      },
+      acquireAdmission,
+      roomCoordinatorSelection: () => {
+        return 'coordinator'
+      },
+      connectRoomCoordinator: async () => {
+        return new Response(null, {
+          status: 503,
+          headers: { 'x-room-coordinator-admission': 'released' },
+        })
+      },
+    })
+
+    const response = await handlers.room(
+      new Request(`https://example.test/api/tables/room-1/events?page=${PAGE_A}`),
+      'room-1',
+    )
+    await response.body!.cancel()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(acquireAdmission).toHaveBeenCalledTimes(2)
+    expect(oldRelease).not.toHaveBeenCalled()
+    expect(freshRelease).toHaveBeenCalledOnce()
+  })
+
+  it('returns retry instead of opening a legacy scheduler during ownership contention', async () => {
+    const openRoom = vi.fn()
+    const openRoomReadOnly = vi.fn()
+    const handlers = createLiveEventHandlers({
+      authenticate: async () => {
+        return 'session-user'
+      },
+      userId: (context: string) => {
+        return context
+      },
+      openLobby: vi.fn(),
+      openRoom,
+      openRoomReadOnly,
+      acquireAdmission: async () => {
+        return {
+          leaseId: PAGE_A,
+          renew: vi.fn(),
+          releaseOnce: vi.fn(),
+          release: vi.fn(),
+        }
+      },
+      roomCoordinatorSelection: () => {
+        return 'coordinator'
+      },
+      connectRoomCoordinator: async () => {
+        return new Response(null, {
+          status: 503,
+          headers: { 'x-room-coordinator-retry': 'ownership', 'Retry-After': '1' },
+        })
+      },
+    })
+
+    const response = await handlers.room(
+      new Request(`https://example.test/api/tables/room-1/events?page=${PAGE_A}`),
+      'room-1',
+    )
+
+    expect(response.status).toBe(503)
+    expect(response.headers.get('Retry-After')).toBe('1')
+    expect(openRoom).not.toHaveBeenCalled()
+    expect(openRoomReadOnly).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['rollback off', 'legacy', `page=${PAGE_A}`],
+    ['mixed-version selected room', 'coordinator', `stream=${PAGE_A}`],
+  ] as const)('keeps %s on the legacy scheduler', async (_label, selection, query) => {
+    const openRoom = vi.fn(() => {
+      return {
+        loadSnapshot: async () => {
+          return roomFor('session-user', 0)
+        },
+        dispose: vi.fn(),
+      }
+    })
+    const handlers = createLiveEventHandlers({
+      authenticate: async () => {
+        return 'session-user'
+      },
+      userId: (context: string) => {
+        return context
+      },
+      openLobby: vi.fn(),
+      openRoom,
+      openRoomReadOnly: vi.fn(),
+      roomCoordinatorSelection: () => {
+        return selection
+      },
+    })
+
+    const response = await handlers.room(
+      new Request(`https://example.test/api/tables/room-1/events?${query}`),
+      'room-1',
+    )
+    const reader = response.body!.getReader()
+    await reader.read()
+    await vi.advanceTimersByTimeAsync(0)
+    await reader.cancel()
+
+    expect(openRoom).toHaveBeenCalledOnce()
   })
 })
 

@@ -19,6 +19,10 @@
         "name": "LIVE_STREAM_ADMISSION",
         "class_name": "LiveStreamAdmissionGate",
       },
+      {
+        "name": "ROOM_COORDINATOR",
+        "class_name": "RoomCoordinator",
+      },
     ],
   },
   "migrations": [
@@ -26,12 +30,24 @@
       "tag": "v1",
       "new_sqlite_classes": ["LiveStreamAdmissionGate"],
     },
+    {
+      "tag": "v2-room-coordinator",
+      "new_sqlite_classes": ["RoomCoordinator"],
+    },
   ],
+  "vars": {
+    "ROOM_COORDINATOR_MODE": "off",
+    "ROOM_COORDINATOR_PERCENTAGE": "0",
+  },
   "queues": {
     "producers": [
       {
         "binding": "RATING_QUEUE",
         "queue": "rating-reconciliation",
+      },
+      {
+        "binding": "ROOM_WAKEUP_QUEUE",
+        "queue": "room-coordinator-wakeups",
       },
     ],
     "consumers": [
@@ -42,6 +58,14 @@
         "max_batch_timeout": 5,
         "max_retries": 5,
         "max_concurrency": 1,
+      },
+      {
+        "queue": "room-coordinator-wakeups",
+        "dead_letter_queue": "room-coordinator-wakeups-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        "max_retries": 10,
+        "max_concurrency": 4,
       },
     ],
   },

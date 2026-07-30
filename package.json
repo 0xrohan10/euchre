@@ -18,6 +18,7 @@
     "fmt:check": "oxfmt --check",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
+    "test:workerd": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=${DATABASE_URL:-postgresql://postgres:postgres@localhost:55437/kitty} vitest run --config vitest.workerd.config.ts",
     "preview": "vite preview",
     "prepare": "husky"
   },
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.47.0",
+    "@cloudflare/vitest-pool-workers": "^0.19.0",
     "@resvg/resvg-js": "2.6.2",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/react": "^16.3.2",

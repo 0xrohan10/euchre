@@ -13,6 +13,17 @@ import {
 } from '../lib/game.validation'
 import { GameService } from './game-service.server'
 import { submitCommandResponse } from './command-response.server'
+import { pokeRoomCoordinator } from './room-coordinator-poke.server'
+
+async function pokeAfterCommit<T>(roomId: string, committed: Promise<T>): Promise<T> {
+  const result = await committed
+  try {
+    pokeRoomCoordinator(roomId)
+  } catch {
+    // A coordinator signal is only a latency optimization; PostgreSQL is authoritative.
+  }
+  return result
+}
 
 export const createRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
@@ -207,10 +218,13 @@ export const leaveRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator(roomIdInput)
   .handler(({ data, context }) => {
-    return context.gameRuntime.runPromise(
-      Effect.flatMap(GameService, (games) => {
-        return games.leaveRoom(context.session.user.id, data.roomId)
-      }),
+    return pokeAfterCommit(
+      data.roomId,
+      context.gameRuntime.runPromise(
+        Effect.flatMap(GameService, (games) => {
+          return games.leaveRoom(context.session.user.id, data.roomId)
+        }),
+      ),
     )
   })
 
@@ -229,16 +243,19 @@ export const submitCommandFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator(submitCommandInput)
   .handler(({ data, context }) => {
-    return context.gameRuntime.runPromise(
-      Effect.flatMap(GameService, (games) => {
-        return submitCommandResponse(
-          data.responseVersion,
-          games.submit(context.session.user.id, data),
-          () => {
-            return games.getRoom(context.session.user.id, data.roomId)
-          },
-        )
-      }),
+    return pokeAfterCommit(
+      data.roomId,
+      context.gameRuntime.runPromise(
+        Effect.flatMap(GameService, (games) => {
+          return submitCommandResponse(
+            data.responseVersion,
+            games.submit(context.session.user.id, data),
+            () => {
+              return games.getRoom(context.session.user.id, data.roomId)
+            },
+          )
+        }),
+      ),
     )
   })
 
@@ -246,15 +263,18 @@ export const voteForBotFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator(voteForBotInput)
   .handler(({ data, context }) => {
-    return context.gameRuntime.runPromise(
-      Effect.flatMap(GameService, (games) => {
-        return games.voteForBot(
-          context.session.user.id,
-          data.roomId,
-          data.disconnectedSeat,
-          data.approve,
-        )
-      }),
+    return pokeAfterCommit(
+      data.roomId,
+      context.gameRuntime.runPromise(
+        Effect.flatMap(GameService, (games) => {
+          return games.voteForBot(
+            context.session.user.id,
+            data.roomId,
+            data.disconnectedSeat,
+            data.approve,
+          )
+        }),
+      ),
     )
   })
 
@@ -262,9 +282,12 @@ export const confirmRematchFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator(roomIdInput)
   .handler(({ data, context }) => {
-    return context.gameRuntime.runPromise(
-      Effect.flatMap(GameService, (games) => {
-        return games.confirmRematch(context.session.user.id, data.roomId)
-      }),
+    return pokeAfterCommit(
+      data.roomId,
+      context.gameRuntime.runPromise(
+        Effect.flatMap(GameService, (games) => {
+          return games.confirmRematch(context.session.user.id, data.roomId)
+        }),
+      ),
     )
   })

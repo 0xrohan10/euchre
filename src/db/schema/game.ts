@@ -394,6 +394,44 @@ export const roomCommand = pgTable(
   },
 )
 
+export const roomWakeup = pgTable(
+  'room_wakeup',
+  {
+    roomId: uuid('room_id')
+      .primaryKey()
+      .references(
+        () => {
+          return room.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    generation: bigint('generation', { mode: 'number' }).notNull().default(1),
+    deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull().defaultNow(),
+    dispatchedGeneration: bigint('dispatched_generation', { mode: 'number' }).notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => {
+    return [index('room_wakeup_pending_idx').on(table.dispatchedGeneration, table.deadlineAt)]
+  },
+)
+
+export const roomSchedulerLease = pgTable('room_scheduler_lease', {
+  roomId: uuid('room_id')
+    .primaryKey()
+    .references(
+      () => {
+        return room.id
+      },
+      { onDelete: 'cascade' },
+    ),
+  mode: varchar('mode', { length: 16 }).$type<'legacy' | 'coordinator'>().notNull(),
+  ownerId: uuid('owner_id').notNull(),
+  epoch: bigint('epoch', { mode: 'number' }).notNull().default(1),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const disconnectVote = pgTable(
   'disconnect_vote',
   {
