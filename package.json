@@ -38,6 +38,7 @@
     "@cloudflare/vite-plugin": "^1.47.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.2",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
