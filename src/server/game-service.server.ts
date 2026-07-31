@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
+import { env } from 'cloudflare:workers'
 import { Context, Data, Effect, Layer, ManagedRuntime } from 'effect'
 import type { Database } from '../db/index.server'
 import {
@@ -7,9 +8,7 @@ import {
   gameHistoryParticipant,
   party,
   partyMember,
-  pendingRating,
   playerRating,
-  ratedMatch,
   rematchVote,
   room,
   roomCommand,
@@ -21,12 +20,7 @@ import { teamOf, type Player } from '../game/player'
 import type { GameHistorySeat, GameHistorySummary } from '../game/history'
 import { reduceGame } from '../game/reduce'
 import type { GameRules } from '../game/rules'
-import {
-  BASE_SKILL_RATING,
-  calculateRatingUpdates,
-  type RatingMode,
-  type RatingSeat,
-} from '../game/skill'
+import { BASE_SKILL_RATING, type RatingMode } from '../game/skill'
 import type { GameAction, GameState } from '../game/state'
 import {
   acceptsRoomAction,
@@ -41,6 +35,11 @@ import {
   type SeatView,
 } from '../multiplayer'
 import { evaluateTickPolicy } from './tick-policy'
+import {
+  pendingEvidenceFromGame,
+  persistRatingOutbox,
+  type RatingQueueMessage,
+} from './rating-reconciliation.server'
 
 export class GameServiceError extends Data.TaggedError('GameServiceError')<{
   readonly code: 'not-found' | 'forbidden' | 'conflict' | 'invalid' | 'database'
@@ -119,7 +118,7 @@ function randomCode(): string {
 }
 
 type RoomReader = Pick<Database, 'select'>
-type HistoryWriter = Pick<Database, 'delete' | 'insert' | 'select' | 'update'>
+type HistoryWriter = Pick<Database, 'delete' | 'execute' | 'insert' | 'select'>
 type CompletedRoom = Pick<typeof room.$inferSelect, 'id' | 'matchId' | 'rules'>
 type CompletedGame = Pick<
   GameState,
@@ -198,9 +197,9 @@ async function recordCompletedMatch(
   game: CompletedGame,
   seats: HistorySeatInput[],
   database: HistoryWriter,
-) {
+): Promise<string | null> {
   if (game.phase !== 'match-over') {
-    return
+    return null
   }
   const fallbackParticipants: NonNullable<GameState['ratingParticipants']> = [
     null,
@@ -282,144 +281,26 @@ async function recordCompletedMatch(
       ratedParticipantIds[seat.seat as Player] = seat.userId
     }
   }
-  const ratedCandidateUserIds = [
-    ...new Set(
-      ratedParticipantIds.flatMap((userId) => {
-        return userId ? [userId] : []
-      }),
-    ),
-  ].sort()
-  const ratedPlayers = created
-    ? players
-    : ratedCandidateUserIds.length > 0
-      ? await database
-          .select({ id: user.id, name: user.name })
-          .from(user)
-          .where(inArray(user.id, ratedCandidateUserIds))
-          .orderBy(user.id)
-      : []
-  const ratedUserIds = ratedPlayers.map((player) => {
-    return player.id
+  await persistRatingOutbox(database, historyRecord.id, {
+    ...pendingEvidenceFromGame(game),
+    participants: ratedParticipantIds,
   })
-  const ratedNames = new Set(ratedUserIds)
-
-  const [ratingClaim] = await database
-    .insert(ratedMatch)
-    .values({ gameHistoryId: historyRecord.id })
-    .onConflictDoNothing()
-    .returning({ gameHistoryId: ratedMatch.gameHistoryId })
-  if (ratingClaim && ratedUserIds.length > 0) {
-    const mode = game.ratingMode ?? 'assisted'
-    await database
-      .insert(playerRating)
-      .values(
-        ratedUserIds.map((userId) => {
-          return { userId, mode }
-        }),
-      )
-      .onConflictDoNothing()
-    const currentRatings = await database
-      .select({
-        userId: playerRating.userId,
-        rating: playerRating.rating,
-        gamesPlayed: playerRating.gamesPlayed,
-      })
-      .from(playerRating)
-      .where(and(eq(playerRating.mode, mode), inArray(playerRating.userId, ratedUserIds)))
-      .orderBy(playerRating.userId)
-      .for('update')
-    const ratingsByUser = new Map(
-      currentRatings.map((rating) => {
-        return [rating.userId, rating]
-      }),
-    )
-    const ratingSeats: RatingSeat[] = ratedParticipantIds.map((userId, seat) => {
-      const validUserId = userId && ratedNames.has(userId) ? userId : null
-      const current = validUserId ? ratingsByUser.get(validUserId) : undefined
-      return {
-        seat: seat as Player,
-        userId: validUserId,
-        rating: current?.rating ?? BASE_SKILL_RATING,
-        gamesPlayed: current?.gamesPlayed ?? 0,
-      }
-    })
-    const winner =
-      game.ratingForfeitTeam === undefined
-        ? ((game.score[0] > game.score[1] ? 0 : 1) as 0 | 1)
-        : ((1 - game.ratingForfeitTeam) as 0 | 1)
-    const completeHands =
-      game.ratingEvidenceComplete && game.handResults?.length === game.handNumber
-        ? game.handResults
-        : []
-    const updates = calculateRatingUpdates(ratingSeats, completeHands, winner)
-    for (const update of updates) {
-      await database
-        .update(playerRating)
-        .set({
-          rating: sql`${playerRating.rating} + ${update.ratingDelta}`,
-          gamesPlayed: sql`${playerRating.gamesPlayed} + 1`,
-          wins: sql`${playerRating.wins} + ${Number(update.won)}`,
-          losses: sql`${playerRating.losses} + ${Number(!update.won)}`,
-          handsPlayed: sql`${playerRating.handsPlayed} + ${update.hands}`,
-          calls: sql`${playerRating.calls} + ${update.calls}`,
-          callsWon: sql`${playerRating.callsWon} + ${update.callsWon}`,
-          partnerCalls: sql`${playerRating.partnerCalls} + ${update.partnerCalls}`,
-          partnerCallsWon: sql`${playerRating.partnerCallsWon} + ${update.partnerCallsWon}`,
-          defenses: sql`${playerRating.defenses} + ${update.defenses}`,
-          defensesWon: sql`${playerRating.defensesWon} + ${update.defensesWon}`,
-          tricksWon: sql`${playerRating.tricksWon} + ${update.tricksWon}`,
-          expectedTricksMilli: sql`${playerRating.expectedTricksMilli} + ${update.expectedTricksMilli}`,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(playerRating.userId, update.userId), eq(playerRating.mode, mode)))
-    }
-  }
-  await database.delete(pendingRating).where(eq(pendingRating.gameHistoryId, historyRecord.id))
+  return historyRecord.id
 }
 
-async function reconcilePendingRating(database: HistoryWriter) {
-  const pendingRecords = await database
-    .select({
-      id: gameHistory.id,
-      sourceRoomId: gameHistory.sourceRoomId,
-      sourceMatchId: gameHistory.sourceMatchId,
-      score0: gameHistory.score0,
-      score1: gameHistory.score1,
-      handCount: gameHistory.handCount,
-      rules: gameHistory.rules,
-      seats: gameHistory.seats,
-      mode: pendingRating.mode,
-      participants: pendingRating.participants,
-      forfeitTeam: pendingRating.forfeitTeam,
-    })
-    .from(pendingRating)
-    .innerJoin(gameHistory, eq(pendingRating.gameHistoryId, gameHistory.id))
-    .orderBy(pendingRating.createdAt)
-  for (const pending of pendingRecords) {
-    await recordCompletedMatch(
-      {
-        id: pending.sourceRoomId ?? `history:${pending.id}`,
-        matchId: pending.sourceMatchId,
-        rules: pending.rules,
-      },
-      {
-        phase: 'match-over',
-        score: [pending.score0, pending.score1],
-        handNumber: pending.handCount,
-        ratingEvidenceComplete: false,
-        ratingMode: pending.mode ?? 'assisted',
-        ratingParticipants: pending.participants ?? undefined,
-        ratingForfeitTeam: pending.forfeitTeam ?? undefined,
-      },
-      pending.seats.map((seat) => {
-        return {
-          seat: seat.seat,
-          userId: seat.userId,
-          controller: seat.controller,
-        }
-      }),
-      database,
-    )
+async function signalRatings(
+  queue: Pick<Queue<RatingQueueMessage>, 'send'> | undefined,
+  gameHistoryIds: readonly string[],
+) {
+  if (!queue) {
+    return
+  }
+  for (const gameHistoryId of new Set(gameHistoryIds)) {
+    try {
+      await queue.send({ gameHistoryId })
+    } catch {
+      console.error('Failed to send rating reconciliation signal')
+    }
   }
 }
 
@@ -603,14 +484,16 @@ async function viewRoomFromRows(
 }
 
 // Keep the service definition flat so changes do not reindent this large module.
-const createGameService = (db: Database) =>
+const createGameService = (
+  db: Database,
+  ratingQueue: Pick<Queue<RatingQueueMessage>, 'send'> | undefined,
+) =>
   // oxlint-disable-next-line arrow-body-style
   GameService.of({
     history: Effect.fn('GameService.history')((userId: string) => {
       return Effect.tryPromise({
         try: () => {
           return db.transaction(async (tx) => {
-            await reconcilePendingRating(tx)
             const records = await tx
               .select({
                 id: gameHistory.id,
@@ -672,7 +555,6 @@ const createGameService = (db: Database) =>
           // so idle ticks stay consistent and still do not contend with command locks.
           const preflight = await db.transaction(
             async (tx) => {
-              await reconcilePendingRating(tx)
               const now = new Date()
               const [preflightRoom] = await tx
                 .select()
@@ -718,7 +600,8 @@ const createGameService = (db: Database) =>
             return preflight.view
           }
 
-          return db.transaction(async (tx) => {
+          const ratingSignals: string[] = []
+          const result = await db.transaction(async (tx) => {
             const lockedNow = new Date()
             const [record] = await tx
               .select()
@@ -867,7 +750,10 @@ const createGameService = (db: Database) =>
                 }
               }
               if (game !== enrolledGame) {
-                await recordCompletedMatch(record, game, currentSeats, tx)
+                const gameHistoryId = await recordCompletedMatch(record, game, currentSeats, tx)
+                if (gameHistoryId) {
+                  ratingSignals.push(gameHistoryId)
+                }
                 await tx
                   .update(room)
                   .set({
@@ -881,6 +767,8 @@ const createGameService = (db: Database) =>
             }
             return viewRoom(userId, roomId, tx)
           })
+          await signalRatings(ratingQueue, ratingSignals)
+          return result
         },
         catch: failure,
       })
@@ -889,7 +777,6 @@ const createGameService = (db: Database) =>
       return Effect.tryPromise({
         try: () => {
           return db.transaction(async (tx) => {
-            await reconcilePendingRating(tx)
             const [seat] = await tx
               .select({ roomId: roomSeat.roomId })
               .from(roomSeat)
@@ -920,7 +807,6 @@ const createGameService = (db: Database) =>
             return viewParty(userId, tx)
           })
           const roomView = await db.transaction(async (tx) => {
-            await reconcilePendingRating(tx)
             const [seat] = await tx
               .select({ roomId: roomSeat.roomId })
               .from(roomSeat)
@@ -1356,6 +1242,7 @@ const createGameService = (db: Database) =>
     leaveRoom: Effect.fn('GameService.leaveRoom')((userId: string, roomId: string) => {
       return Effect.tryPromise({
         try: async () => {
+          const ratingSignals: string[] = []
           await db.transaction(async (tx) => {
             const [record] = await tx
               .select()
@@ -1384,7 +1271,10 @@ const createGameService = (db: Database) =>
                 return seat.userId === userId || (seat.userId === null && seat.controller === 'bot')
               })
             if (record.game) {
-              await recordCompletedMatch(record, record.game, seats, tx)
+              const gameHistoryId = await recordCompletedMatch(record, record.game, seats, tx)
+              if (gameHistoryId) {
+                ratingSignals.push(gameHistoryId)
+              }
             }
             if (record.partyId && record.status === 'finished') {
               await tx.delete(room).where(eq(room.id, roomId))
@@ -1425,6 +1315,7 @@ const createGameService = (db: Database) =>
               .set({ hostUserId, version: record.version + 1, updatedAt: new Date() })
               .where(eq(room.id, roomId))
           })
+          await signalRatings(ratingQueue, ratingSignals)
         },
         catch: failure,
       })
@@ -1441,8 +1332,9 @@ const createGameService = (db: Database) =>
     }),
     submit: Effect.fn('GameService.submit')((userId: string, command: SubmitCommand) => {
       return Effect.tryPromise({
-        try: () => {
-          return db.transaction(async (tx) => {
+        try: async () => {
+          const ratingSignals: string[] = []
+          const result = await db.transaction(async (tx) => {
             const [record] = await tx
               .select()
               .from(room)
@@ -1511,7 +1403,10 @@ const createGameService = (db: Database) =>
               throw new DomainError('forbidden', 'It is not your turn.')
             }
             if (command.action.type === 'new-match') {
-              await recordCompletedMatch(record, record.game, seats, tx)
+              const gameHistoryId = await recordCompletedMatch(record, record.game, seats, tx)
+              if (gameHistoryId) {
+                ratingSignals.push(gameHistoryId)
+              }
             }
             const nextGame = reduceGame(record.game, command.action as GameAction)
             const reduced =
@@ -1534,7 +1429,10 @@ const createGameService = (db: Database) =>
               hostDisconnected,
             )
             if (command.action.type !== 'new-match') {
-              await recordCompletedMatch(record, reduced, seats, tx)
+              const gameHistoryId = await recordCompletedMatch(record, reduced, seats, tx)
+              if (gameHistoryId) {
+                ratingSignals.push(gameHistoryId)
+              }
             }
             await tx.insert(roomCommand).values({
               roomId: command.roomId,
@@ -1554,6 +1452,8 @@ const createGameService = (db: Database) =>
               .where(eq(room.id, command.roomId))
             return viewRoom(userId, command.roomId, tx)
           })
+          await signalRatings(ratingQueue, ratingSignals)
+          return result
         },
         catch: failure,
       })
@@ -1676,8 +1576,9 @@ const createGameService = (db: Database) =>
     ),
     confirmRematch: Effect.fn('GameService.confirmRematch')((userId: string, roomId: string) => {
       return Effect.tryPromise({
-        try: () => {
-          return db.transaction(async (tx) => {
+        try: async () => {
+          const ratingSignals: string[] = []
+          const result = await db.transaction(async (tx) => {
             const [record] = await tx
               .select()
               .from(room)
@@ -1713,7 +1614,10 @@ const createGameService = (db: Database) =>
                 })
               })
             ) {
-              await recordCompletedMatch(record, record.game, seats, tx)
+              const gameHistoryId = await recordCompletedMatch(record, record.game, seats, tx)
+              if (gameHistoryId) {
+                ratingSignals.push(gameHistoryId)
+              }
               const game = withRatingContext(reduceGame(record.game, { type: 'new-match' }), seats)
               await tx.delete(rematchVote).where(eq(rematchVote.roomId, roomId))
               await tx
@@ -1734,6 +1638,8 @@ const createGameService = (db: Database) =>
             }
             return viewRoom(userId, roomId, tx)
           })
+          await signalRatings(ratingQueue, ratingSignals)
+          return result
         },
         catch: failure,
       })
@@ -1813,6 +1719,9 @@ const createGameService = (db: Database) =>
     ),
   })
 
-export function createGameRuntime(database: Database) {
-  return ManagedRuntime.make(Layer.succeed(GameService, createGameService(database)))
+export function createGameRuntime(
+  database: Database,
+  ratingQueue: Pick<Queue<RatingQueueMessage>, 'send'> | undefined = env.RATING_QUEUE,
+) {
+  return ManagedRuntime.make(Layer.succeed(GameService, createGameService(database, ratingQueue)))
 }

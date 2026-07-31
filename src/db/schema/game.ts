@@ -17,7 +17,7 @@ import type { GameRules } from '../../game/rules'
 import type { GameHistorySeat } from '../../game/history'
 import type { GameAction, GameState } from '../../game/state'
 import type { Team } from '../../game/player'
-import type { RatingMode } from '../../game/skill'
+import type { HandResult, RatingMode } from '../../game/skill'
 import { user } from './auth'
 
 export const roomStatus = pgEnum('room_status', ['lobby', 'playing', 'paused', 'finished'])
@@ -169,20 +169,53 @@ export const ratedMatch = pgTable('rated_match', {
   ratedAt: timestamp('rated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
-export const pendingRating = pgTable('pending_rating', {
-  gameHistoryId: uuid('game_history_id')
-    .primaryKey()
-    .references(
-      () => {
-        return gameHistory.id
-      },
-      { onDelete: 'cascade' },
-    ),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  mode: varchar('mode', { length: 16 }).$type<RatingMode>(),
-  participants: jsonb('participants').$type<GameState['ratingParticipants']>(),
-  forfeitTeam: integer('forfeit_team').$type<Team>(),
-})
+export const pendingRating = pgTable(
+  'pending_rating',
+  {
+    gameHistoryId: uuid('game_history_id')
+      .primaryKey()
+      .references(
+        () => {
+          return gameHistory.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    mode: varchar('mode', { length: 16 }).$type<RatingMode>(),
+    participants: jsonb('participants').$type<GameState['ratingParticipants']>(),
+    forfeitTeam: integer('forfeit_team').$type<Team>(),
+    handResults: jsonb('hand_results').$type<HandResult[]>(),
+  },
+  (table) => {
+    return [index('pending_rating_created_at_idx').on(table.createdAt)]
+  },
+)
+
+export const ratingOutbox = pgTable(
+  'rating_outbox',
+  {
+    gameHistoryId: uuid('game_history_id')
+      .primaryKey()
+      .references(
+        () => {
+          return gameHistory.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    mode: varchar('mode', { length: 16 }).$type<RatingMode>().notNull(),
+    participants: jsonb('participants')
+      .$type<NonNullable<GameState['ratingParticipants']>>()
+      .notNull(),
+    forfeitTeam: integer('forfeit_team').$type<Team>(),
+    handResults: jsonb('hand_results').$type<HandResult[]>(),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+    failureCode: varchar('failure_code', { length: 64 }),
+  },
+  (table) => {
+    return [index('rating_outbox_created_at_idx').on(table.createdAt)]
+  },
+)
 
 export const playerRating = pgTable(
   'player_rating',

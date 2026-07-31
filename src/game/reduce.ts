@@ -1,6 +1,7 @@
 import { SUITS, hasNaturalTrump, legalCards, trickWinner } from './card'
 import { createGame, deal, farmersHandRank } from './deal'
 import { next, nextActive, teamName, teamOf } from './player'
+import { scoreCompletedHand } from './scoring'
 import { emptyWonTricks, type GameAction, type GameState } from './state'
 import { summarizeCompletedHand } from './skill'
 
@@ -22,8 +23,7 @@ function scoreHand(state: GameState): GameState {
   }
   const makerTeam = teamOf(state.maker)
   const made = state.tricks[makerTeam]
-  const points = made < 3 ? 2 : made === 5 ? (state.lonePlayer === null ? 2 : 4) : 1
-  const scoringTeam = made < 3 ? ((1 - makerTeam) as 0 | 1) : makerTeam
+  const { points, scoringTeam } = scoreCompletedHand(state.maker, state.lonePlayer, state.tricks)
   const score: [number, number] = [...state.score]
   score[scoringTeam] += points
   const matchOver = score[scoringTeam] >= 10
