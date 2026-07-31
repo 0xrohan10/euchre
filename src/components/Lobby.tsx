@@ -1,24 +1,51 @@
-import { useState } from 'react'
-import { Link, useNavigate, useRouter } from '@tanstack/react-router'
-import { authClient } from '../lib/auth-client'
+import { useEffect, useId, useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import {
+  RequestDeadlineError,
+  type LiveConnectionState,
+  withRequestDeadline,
+} from '../interaction-feedback'
 import type { GameRules } from '../game/rules'
 import type { PartyView, RoomView } from '../multiplayer'
 import {
   createPartyFn,
   createRoomFn,
   createSinglePlayerRoomFn,
+  getRoomForCreationFn,
   joinRoomFn,
   leavePartyFn,
   leaveRoomFn,
   startPartyRoomFn,
 } from '../server/game.functions'
 import { Brand } from './Brand'
+import { ConnectionStatus } from './ConnectionStatus'
+import { CopyInviteButton } from './CopyInviteButton'
 import { HeaderMenu } from './HeaderMenu'
 import { HowToPlay } from './HowToPlay'
 import { PlayerBadge } from './PlayerBadge'
 import { RuleToggle } from './RuleToggle'
 import { loadStoredRules, RULES_STORAGE_KEY } from './rules-storage'
 import { SEAT_ORDER, seatsByNumber } from './seats'
+
+type LobbyOperation =
+  | { type: 'open-room'; label: string }
+  | { type: 'leave-room'; label: 'Leaving table…' }
+  | { type: 'create-party'; label: 'Creating partnership…' }
+  | { type: 'leave-party'; label: 'Leaving partnership…' }
+
+type RoomCreationKind = 'multiplayer' | 'single-player'
+type RoomCreation = {
+  request: { operationId: string; rules: GameRules }
+  attempts: Set<Promise<RoomView>>
+  settled: boolean
+}
+
+class DefinitiveCreationRejection extends Error {
+  constructor() {
+    super('Room creation was rejected before commit.')
+    this.name = 'DefinitiveCreationRejection'
+  }
+}
 
 export function Lobby({
   room,
@@ -29,6 +56,8 @@ export function Lobby({
   onLeave,
   userId,
   userName,
+  connection,
+  onSignOut,
 }: {
   room: RoomView | null
   party: PartyView | null
@@ -38,9 +67,9 @@ export function Lobby({
   onLeave: () => void
   userId: string
   userName: string
+  connection: LiveConnectionState
+  onSignOut: () => void
 }) {
-  const navigate = useNavigate()
-  const router = useRouter()
   const [mode, setMode] = useState<'multiplayer' | null>(null)
   const [setupMode, setSetupMode] = useState<'single-player' | 'multiplayer' | 'partner' | null>(
     null,
@@ -48,10 +77,35 @@ export function Lobby({
   const [rules, setRules] = useState<GameRules>(loadStoredRules)
   const [code, setCode] = useState('')
   const [error, setError] = useState(initialError ?? '')
-  const [pending, setPending] = useState(false)
+  const [operation, setOperation] = useState<LobbyOperation | null>(null)
+  const [ambiguousCreation, setAmbiguousCreation] = useState<{
+    kind: RoomCreationKind
+    creation: RoomCreation
+  } | null>(null)
+  const roomCreations = useRef(new Map<RoomCreationKind, RoomCreation>())
+  const errorId = useId()
   const lobbySeats = room ? seatsByNumber(room.seats) : null
+  const actionsDisabled = operation !== null || (room !== null && !connection.snapshotTrusted)
+  const creationRecoveryActive = ambiguousCreation !== null
+  const retainedCreation =
+    setupMode === 'single-player' || setupMode === 'multiplayer'
+      ? ambiguousCreation?.kind === setupMode
+        ? ambiguousCreation.creation
+        : null
+      : null
+  const displayedRules = retainedCreation?.request.rules ?? rules
+
+  useEffect(() => {
+    if (room) {
+      roomCreations.current.clear()
+      setAmbiguousCreation(null)
+    }
+  }, [room])
 
   function setRule(rule: keyof GameRules, enabled: boolean) {
+    if (retainedCreation) {
+      return
+    }
     setRules((current) => {
       const next = { ...current, [rule]: enabled }
       localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(next))
@@ -59,56 +113,175 @@ export function Lobby({
       return next
     })
   }
-  async function run(operation: () => Promise<RoomView>) {
-    setPending(true)
+  async function run(label: string, task: () => Promise<RoomView>, applyDeadline = true) {
+    if (ambiguousCreation) {
+      setError('Wait for the table request to resolve or retry it from the current setup screen.')
+      return
+    }
+    setOperation({ type: 'open-room', label })
     setError('')
     try {
-      onRoom(await operation())
+      onRoom(await (applyDeadline ? withRequestDeadline(task) : task()))
     } catch {
-      setError('Could not open that table.')
+      setError('Could not open that table. Please try again.')
     } finally {
-      setPending(false)
+      setOperation(null)
+    }
+  }
+  async function createRoom(
+    kind: RoomCreationKind,
+    label: string,
+    create: (data: {
+      operationId: string
+      rules: GameRules
+    }) => Promise<RoomView | { outcome: 'created'; room: RoomView } | { outcome: 'rejected' }>,
+  ) {
+    if (ambiguousCreation && ambiguousCreation.kind !== kind) {
+      setError('Wait for the table request to resolve or retry it before starting another game.')
+      return
+    }
+    const creation = roomCreations.current.get(kind) ?? {
+      request: { operationId: crypto.randomUUID(), rules: { ...rules } },
+      attempts: new Set<Promise<RoomView>>(),
+      settled: false,
+    }
+    roomCreations.current.set(kind, creation)
+    const submit = () => {
+      const request = Promise.resolve().then(async () => {
+        const result = await create(creation.request)
+        if ('outcome' in result) {
+          if (result.outcome === 'rejected') {
+            throw new DefinitiveCreationRejection()
+          }
+          return result.room
+        }
+        return result
+      })
+      creation.attempts.add(request)
+      void request.then(
+        (nextRoom) => {
+          if (roomCreations.current.get(kind) !== creation || creation.settled) {
+            return
+          }
+          creation.settled = true
+          roomCreations.current.delete(kind)
+          setAmbiguousCreation((current) => {
+            return current?.creation === creation ? null : current
+          })
+          onRoom(nextRoom)
+        },
+        async (cause) => {
+          creation.attempts.delete(request)
+          if (
+            roomCreations.current.get(kind) !== creation ||
+            creation.settled ||
+            creation.attempts.size > 0
+          ) {
+            return
+          }
+          let reconciledRoom: RoomView | null = null
+          try {
+            reconciledRoom = await getRoomForCreationFn({
+              data: { operationId: creation.request.operationId, kind },
+            })
+          } catch {
+            // Lookup transport failure is ambiguous too; retain the operation for an identical retry.
+          }
+          if (roomCreations.current.get(kind) !== creation || creation.settled) {
+            return
+          }
+          if (reconciledRoom) {
+            creation.settled = true
+            roomCreations.current.delete(kind)
+            setAmbiguousCreation((current) => {
+              return current?.creation === creation ? null : current
+            })
+            onRoom(reconciledRoom)
+            return
+          }
+          if (cause instanceof DefinitiveCreationRejection) {
+            roomCreations.current.delete(kind)
+            setAmbiguousCreation((current) => {
+              return current?.creation === creation ? null : current
+            })
+            setError('Could not open that table. Please try again.')
+            return
+          }
+          setAmbiguousCreation({ kind, creation })
+          setError('The table request may still have completed. Retry using the same settings.')
+        },
+      )
+      return request
+    }
+
+    setOperation({ type: 'open-room', label })
+    setError('')
+    try {
+      try {
+        await withRequestDeadline(submit)
+      } catch (cause) {
+        if (!(cause instanceof RequestDeadlineError)) {
+          throw cause
+        }
+        await withRequestDeadline(submit)
+      }
+    } catch (cause) {
+      if (cause instanceof RequestDeadlineError || roomCreations.current.get(kind) === creation) {
+        setAmbiguousCreation({ kind, creation })
+        setError('The table request may still complete. Retry when ready using the same settings.')
+      } else {
+        setError('Could not open that table. Please try again.')
+      }
+    } finally {
+      setOperation(null)
     }
   }
   async function leave() {
     if (!room) {
       return
     }
-    setPending(true)
+    setOperation({ type: 'leave-room', label: 'Leaving table…' })
     setError('')
     try {
-      await leaveRoomFn({ data: { roomId: room.id } })
+      await withRequestDeadline(() => {
+        return leaveRoomFn({ data: { roomId: room.id } })
+      })
       onLeave()
     } catch {
-      setError('Could not leave that table.')
+      setError('Could not leave that table. Please try again.')
     } finally {
-      setPending(false)
+      setOperation(null)
     }
   }
   async function createPartnership() {
-    setPending(true)
+    if (ambiguousCreation) {
+      setError('Wait for the table request to resolve or retry it before joining a partnership.')
+      return
+    }
+    setOperation({ type: 'create-party', label: 'Creating partnership…' })
     setError('')
     try {
-      onParty(await createPartyFn())
+      onParty(await withRequestDeadline(createPartyFn))
     } catch {
-      setError('Could not create a partnership.')
+      setError('Could not create a partnership. Please try again.')
     } finally {
-      setPending(false)
+      setOperation(null)
     }
   }
   async function leavePartnership() {
-    setPending(true)
+    setOperation({ type: 'leave-party', label: 'Leaving partnership…' })
     setError('')
     try {
-      await leavePartyFn()
+      await withRequestDeadline(leavePartyFn)
       onParty(null)
       setSetupMode(null)
     } catch {
-      setError('Could not leave this partnership.')
+      setError('Could not leave this partnership. Please try again.')
     } finally {
-      setPending(false)
+      setOperation(null)
     }
   }
+
   return (
     <main className="lobby-shell">
       <header className="app-header">
@@ -121,32 +294,30 @@ export function Lobby({
           <HowToPlay />
           <button
             className="quiet-button"
+            disabled={operation !== null}
             onClick={() => {
-              return void authClient.signOut().then(async () => {
-                await navigate({ to: '/sign-in', replace: true })
-                await router.invalidate()
-              })
+              onSignOut()
             }}
           >
             Sign out
           </button>
         </HeaderMenu>
       </header>
-      <section className="lobby-card">
+      <section className="lobby-card" aria-busy={operation !== null}>
+        <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {operation?.label ?? ''}
+        </span>
         {room ? (
           <>
             <span className="eyebrow">Invite table</span>
             <h1>Waiting for four</h1>
-            <button
+            <CopyInviteButton
+              key={room.id}
+              path={`/games/${room.code}`}
+              label={`${room.code} · Copy invite`}
               className="room-code large"
-              onClick={() => {
-                return void navigator.clipboard.writeText(
-                  `${window.location.origin}/games/${room.code}`,
-                )
-              }}
-            >
-              {room.code} · Copy invite
-            </button>
+            />
+            <ConnectionStatus connection={connection} />
             <div className="lobby-seats">
               {SEAT_ORDER.map((seat) => {
                 return (
@@ -163,12 +334,12 @@ export function Lobby({
             <p>The match starts automatically when the fourth player joins.</p>
             <button
               className="quiet-button"
-              disabled={pending}
+              disabled={actionsDisabled}
               onClick={() => {
                 return void leave()
               }}
             >
-              {pending ? 'Leaving…' : 'Leave table'}
+              {operation?.type === 'leave-room' ? 'Leaving…' : 'Leave table'}
             </button>
           </>
         ) : setupMode ? (
@@ -180,8 +351,8 @@ export function Lobby({
               <RuleToggle
                 title="Stick the dealer"
                 description="The dealer must choose trump in the second round."
-                checked={rules.stickDealer}
-                disabled={pending}
+                checked={displayedRules.stickDealer}
+                disabled={actionsDisabled || retainedCreation !== null}
                 onChange={(enabled) => {
                   return setRule('stickDealer', enabled)
                 }}
@@ -189,8 +360,8 @@ export function Lobby({
               <RuleToggle
                 title="Require natural trump"
                 description="A caller must hold a card printed in that suit. The left bower does not count."
-                checked={rules.requireNaturalTrump}
-                disabled={pending}
+                checked={displayedRules.requireNaturalTrump}
+                disabled={actionsDisabled || retainedCreation !== null}
                 onChange={(enabled) => {
                   return setRule('requireNaturalTrump', enabled)
                 }}
@@ -198,8 +369,8 @@ export function Lobby({
               <RuleToggle
                 title="Partner-order loners"
                 description="Allow going alone when ordering up your partner as dealer."
-                checked={rules.allowAloneWhenOrderingPartner}
-                disabled={pending}
+                checked={displayedRules.allowAloneWhenOrderingPartner}
+                disabled={actionsDisabled || retainedCreation !== null}
                 onChange={(enabled) => {
                   return setRule('allowAloneWhenOrderingPartner', enabled)
                 }}
@@ -207,35 +378,47 @@ export function Lobby({
               <RuleToggle
                 title="Farmer's hand"
                 description="Swap three 9s or three 10s for the face-down kitty, then pass unless stuck as dealer."
-                checked={rules.allowFarmersHand}
-                disabled={pending}
+                checked={displayedRules.allowFarmersHand}
+                disabled={actionsDisabled || retainedCreation !== null}
                 onChange={(enabled) => {
                   return setRule('allowFarmersHand', enabled)
                 }}
               />
             </div>
+            {retainedCreation && (
+              <p>
+                This table request is not confirmed yet. Stay here and retry with the same settings.
+                Other table actions are locked, and a late success will open automatically.
+              </p>
+            )}
             <button
               className="primary-button"
-              disabled={pending}
+              disabled={
+                actionsDisabled || (creationRecoveryActive && ambiguousCreation.kind !== setupMode)
+              }
               onClick={() => {
-                return void run(() => {
+                const label = setupMode === 'multiplayer' ? 'Creating table…' : 'Starting game…'
+                if (setupMode === 'partner') {
+                  return void run(label, () => {
+                    return startPartyRoomFn({ data: { rules: displayedRules } })
+                  })
+                }
+                return void createRoom(setupMode, label, (data) => {
                   return setupMode === 'single-player'
-                    ? createSinglePlayerRoomFn({ data: { rules } })
-                    : setupMode === 'partner'
-                      ? startPartyRoomFn({ data: { rules } })
-                      : createRoomFn({ data: { rules } })
+                    ? createSinglePlayerRoomFn({ data })
+                    : createRoomFn({ data })
                 })
               }}
             >
-              {pending
-                ? 'Starting…'
+              {operation?.type === 'open-room'
+                ? operation.label
                 : setupMode === 'single-player' || setupMode === 'partner'
                   ? 'Start game'
                   : 'Create table'}
             </button>
             <button
               className="quiet-button"
-              disabled={pending}
+              disabled={actionsDisabled || creationRecoveryActive}
               onClick={() => {
                 return setSetupMode(null)
               }}
@@ -266,23 +449,19 @@ export function Lobby({
             </div>
             {party.members.length === 1 && (
               <>
-                <button
+                <CopyInviteButton
+                  key={party.id}
+                  path={`/partners/${party.inviteCode}`}
+                  label="Copy partner invite"
                   className="room-code large"
-                  onClick={() => {
-                    return void navigator.clipboard.writeText(
-                      `${window.location.origin}/partners/${party.inviteCode}`,
-                    )
-                  }}
-                >
-                  Copy partner invite
-                </button>
+                />
                 <p>The link is single-use. Your partner will be asked to sign in before joining.</p>
               </>
             )}
             {party.members.length === 2 && party.ownerUserId === userId && (
               <button
                 className="primary-button"
-                disabled={pending}
+                disabled={actionsDisabled || creationRecoveryActive}
                 onClick={() => {
                   return setSetupMode('partner')
                 }}
@@ -295,12 +474,12 @@ export function Lobby({
             )}
             <button
               className="quiet-button"
-              disabled={pending}
+              disabled={actionsDisabled}
               onClick={() => {
                 return void leavePartnership()
               }}
             >
-              {pending ? 'Leaving…' : 'Leave partnership'}
+              {operation?.type === 'leave-party' ? 'Leaving…' : 'Leave partnership'}
             </button>
           </>
         ) : mode === null ? (
@@ -311,7 +490,7 @@ export function Lobby({
             <div className="mode-options">
               <button
                 className="mode-option"
-                disabled={pending}
+                disabled={actionsDisabled || creationRecoveryActive}
                 onClick={() => {
                   return setSetupMode('single-player')
                 }}
@@ -321,7 +500,7 @@ export function Lobby({
               </button>
               <button
                 className="mode-option"
-                disabled={pending}
+                disabled={actionsDisabled || creationRecoveryActive}
                 onClick={() => {
                   return void createPartnership()
                 }}
@@ -331,6 +510,7 @@ export function Lobby({
               </button>
               <button
                 className="mode-option"
+                disabled={actionsDisabled || creationRecoveryActive}
                 onClick={() => {
                   return setMode('multiplayer')
                 }}
@@ -347,7 +527,7 @@ export function Lobby({
             <p>Create a private table or enter a six-character invite code.</p>
             <button
               className="primary-button"
-              disabled={pending}
+              disabled={actionsDisabled || creationRecoveryActive}
               onClick={() => {
                 return setSetupMode('multiplayer')
               }}
@@ -358,12 +538,13 @@ export function Lobby({
               className="join-form"
               onSubmit={(event) => {
                 event.preventDefault()
-                void run(() => {
+                void run('Joining table…', () => {
                   return joinRoomFn({ data: { code } })
                 })
               }}
             >
               <input
+                disabled={actionsDisabled || creationRecoveryActive}
                 value={code}
                 onChange={(event) => {
                   return setCode(event.target.value.toUpperCase())
@@ -371,14 +552,16 @@ export function Lobby({
                 placeholder="INVITE"
                 maxLength={6}
                 required
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? errorId : undefined}
               />
-              <button className="quiet-button" disabled={pending}>
-                Join
+              <button className="quiet-button" disabled={actionsDisabled || creationRecoveryActive}>
+                {operation?.type === 'open-room' ? 'Joining…' : 'Join'}
               </button>
             </form>
             <button
               className="quiet-button"
-              disabled={pending}
+              disabled={actionsDisabled || creationRecoveryActive}
               onClick={() => {
                 return setMode(null)
               }}
@@ -387,7 +570,11 @@ export function Lobby({
             </button>
           </>
         )}
-        {error && <p className="form-error">{error}</p>}
+        {error && (
+          <p className="form-error" id={errorId} role="alert">
+            {error}
+          </p>
+        )}
       </section>
     </main>
   )

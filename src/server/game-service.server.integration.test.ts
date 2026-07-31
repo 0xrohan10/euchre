@@ -2,7 +2,15 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import pg from 'pg'
-import { party, partyJoin, partyMember, room, roomSeat, user } from '../db/schema'
+import {
+  activeRoomMembership,
+  party,
+  partyJoin,
+  partyMember,
+  room,
+  roomSeat,
+  user,
+} from '../db/schema'
 import { DEFAULT_RULES } from '../game/rules'
 import { createGame } from '../game/deal'
 import { createDeck } from '../game/card'
@@ -81,7 +89,7 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     const updatedAt = options.updatedAt ?? new Date()
     await db.insert(room).values({
       id: roomId,
-      code: uniqueId('code').slice(0, 6).toUpperCase(),
+      code: crypto.randomUUID().slice(0, 6).toUpperCase(),
       hostUserId: options.hostUserId,
       partyId: options.partyId,
       rules: DEFAULT_RULES,
@@ -126,6 +134,21 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     return roomId
   }
 
+  async function insertLobby(hostUserId: string) {
+    const roomId = crypto.randomUUID()
+    const code = crypto.randomUUID().slice(0, 6).toUpperCase()
+    createdRoomIds.push(roomId)
+    await db.insert(room).values({
+      id: roomId,
+      code,
+      hostUserId,
+      rules: DEFAULT_RULES,
+      status: 'lobby',
+    })
+    await db.insert(roomSeat).values({ roomId, seat: 0, userId: hostUserId, connected: true })
+    return { code, roomId }
+  }
+
   async function insertParty(ownerUserId: string, partnerUserId: string) {
     const [created] = await db.insert(party).values({ ownerUserId }).returning({ id: party.id })
     createdPartyIds.push(created.id)
@@ -159,6 +182,21 @@ describeIntegration('GameService.tick lock and race behavior', () => {
       controller: match.controller,
       lastSeenAt: match.lastSeenAt.getTime(),
     }
+  }
+
+  async function activeRoomIds(userId: string) {
+    const result = await admin.query<{ id: string }>(
+      `select room.id
+       from room_seat
+       join room on room.id = room_seat.room_id
+       where room_seat.user_id = $1
+         and room.status in ('lobby', 'playing', 'paused')
+       order by room.id`,
+      [userId],
+    )
+    return result.rows.map(({ id }) => {
+      return id
+    })
   }
 
   async function withRoomLockBarrier<T>(
@@ -267,6 +305,40 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     }
   }
 
+  async function withUserLockBarrier<T>(
+    userId: string,
+    work: (hold: {
+      release: () => Promise<void>
+      waitForBlockedTransitions: (count: number) => Promise<void>
+    }) => Promise<T>,
+  ) {
+    const client = await admin.connect()
+    try {
+      await client.query('begin')
+      await client.query('select id from "user" where id = $1 for no key update', [userId])
+      let released = false
+      const release = async () => {
+        if (released) {
+          return
+        }
+        released = true
+        await client.query('rollback')
+      }
+      const waitForBlockedTransitions = async (count: number) => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, count * 50)
+        })
+      }
+      try {
+        return await work({ release, waitForBlockedTransitions })
+      } finally {
+        await release()
+      }
+    } finally {
+      client.release()
+    }
+  }
+
   function tick(userId: string, roomId: string) {
     return gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
@@ -291,10 +363,52 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     )
   }
 
+  function createRoomForOperation(
+    userId: string,
+    operationId: string,
+    kind: 'multiplayer' | 'single-player',
+  ) {
+    return gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        return kind === 'multiplayer'
+          ? games.createRoom(userId, operationId, DEFAULT_RULES)
+          : games.createSinglePlayerRoom(userId, operationId, DEFAULT_RULES)
+      }),
+    )
+  }
+
+  function roomForCreationOperation(
+    userId: string,
+    operationId: string,
+    kind: 'multiplayer' | 'single-player',
+  ) {
+    return gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        return games.roomForCreationOperation(userId, operationId, kind)
+      }),
+    )
+  }
+
   function joinParty(userId: string, inviteCode: string) {
     return gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
         return games.joinParty(userId, inviteCode)
+      }),
+    )
+  }
+
+  function joinRoom(userId: string, code: string) {
+    return gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        return games.joinRoom(userId, code)
+      }),
+    )
+  }
+
+  function startPartyRoom(userId: string) {
+    return gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        return games.startPartyRoom(userId, DEFAULT_RULES)
       }),
     )
   }
@@ -349,6 +463,560 @@ describeIntegration('GameService.tick lock and race behavior', () => {
       }),
     }
   }
+
+  it.each(['multiplayer', 'single-player'] as const)(
+    'returns the same projected room for sequential duplicate %s creation',
+    async (kind) => {
+      const userId = await insertUser(`create-${kind}-sequential`)
+      const operationId = crypto.randomUUID()
+
+      const first = await createRoomForOperation(userId, operationId, kind)
+      createdRoomIds.push(first.id)
+      const second = await createRoomForOperation(userId, operationId, kind)
+
+      expect(second).toEqual(first)
+      const records = await db.select({ id: room.id }).from(room).where(eq(room.hostUserId, userId))
+      expect(records).toEqual([{ id: first.id }])
+    },
+  )
+
+  it.each(['multiplayer', 'single-player'] as const)(
+    'reconciles a committed %s creation after response loss and keeps one room on retry',
+    async (kind) => {
+      const userId = await insertUser(`create-${kind}-response-loss`)
+      const operationId = crypto.randomUUID()
+      let committedRoomId = ''
+
+      await expect(
+        createRoomForOperation(userId, operationId, kind).then((created) => {
+          committedRoomId = created.id
+          createdRoomIds.push(created.id)
+          throw new Error('response lost after commit')
+        }),
+      ).rejects.toThrow('response lost after commit')
+
+      const reconciled = await roomForCreationOperation(userId, operationId, kind)
+      const retried = await createRoomForOperation(userId, operationId, kind)
+      expect(reconciled?.id).toBe(committedRoomId)
+      expect(retried.id).toBe(committedRoomId)
+      const records = await db.select({ id: room.id }).from(room).where(eq(room.hostUserId, userId))
+      expect(records).toEqual([{ id: committedRoomId }])
+    },
+  )
+
+  it.each(['multiplayer', 'single-player'] as const)(
+    'returns the same projected room for concurrent duplicate %s creation',
+    async (kind) => {
+      const userId = await insertUser(`create-${kind}-concurrent`)
+      const operationId = crypto.randomUUID()
+
+      const [first, second] = await Promise.all([
+        createRoomForOperation(userId, operationId, kind),
+        createRoomForOperation(userId, operationId, kind),
+      ])
+      createdRoomIds.push(first.id)
+
+      expect(second).toEqual(first)
+      const records = await db.select({ id: room.id }).from(room).where(eq(room.hostUserId, userId))
+      expect(records).toEqual([{ id: first.id }])
+    },
+  )
+
+  it.each(['multiplayer', 'single-player'] as const)(
+    'acquires one active room for concurrent %s creation with different operation IDs',
+    async (kind) => {
+      const userId = await insertUser(`create-${kind}-different-operations`)
+      const firstOperationId = crypto.randomUUID()
+      const secondOperationId = crypto.randomUUID()
+
+      const [first, second] = await Promise.all([
+        createRoomForOperation(userId, firstOperationId, kind),
+        createRoomForOperation(userId, secondOperationId, kind),
+      ])
+      createdRoomIds.push(first.id)
+
+      expect(second).toEqual(first)
+      await expect(roomForCreationOperation(userId, firstOperationId, kind)).resolves.toEqual(first)
+      await expect(roomForCreationOperation(userId, secondOperationId, kind)).resolves.toEqual(
+        first,
+      )
+      const records = await db.select({ id: room.id }).from(room).where(eq(room.hostUserId, userId))
+      expect(records).toEqual([{ id: first.id }])
+    },
+  )
+
+  it('acquires one active room for concurrent creation kinds with different operation IDs', async () => {
+    const userId = await insertUser('create-mixed-kinds-different-operations')
+    const multiplayerOperationId = crypto.randomUUID()
+    const singlePlayerOperationId = crypto.randomUUID()
+
+    const [multiplayerRoom, singlePlayerRoom] = await Promise.all([
+      createRoomForOperation(userId, multiplayerOperationId, 'multiplayer'),
+      createRoomForOperation(userId, singlePlayerOperationId, 'single-player'),
+    ])
+    createdRoomIds.push(multiplayerRoom.id)
+
+    expect(singlePlayerRoom).toEqual(multiplayerRoom)
+    await expect(
+      roomForCreationOperation(userId, multiplayerOperationId, 'multiplayer'),
+    ).resolves.toEqual(multiplayerRoom)
+    await expect(
+      roomForCreationOperation(userId, singlePlayerOperationId, 'single-player'),
+    ).resolves.toEqual(multiplayerRoom)
+    const records = await db.select({ id: room.id }).from(room).where(eq(room.hostUserId, userId))
+    expect(records).toEqual([{ id: multiplayerRoom.id }])
+  })
+
+  it('does not alias multiplayer and single-player creation operations', async () => {
+    const userId = await insertUser('create-kind-mismatch')
+    const operationId = crypto.randomUUID()
+    const created = await createRoomForOperation(userId, operationId, 'multiplayer')
+    createdRoomIds.push(created.id)
+
+    await expect(
+      createRoomForOperation(userId, operationId, 'single-player'),
+    ).rejects.toMatchObject({ code: 'conflict' })
+  })
+
+  it('does not replay a creation operation after its room is deleted', async () => {
+    const userId = await insertUser('create-after-delete')
+    const operationId = crypto.randomUUID()
+    const created = await createRoomForOperation(userId, operationId, 'single-player')
+    await db.delete(room).where(eq(room.id, created.id))
+
+    await expect(
+      createRoomForOperation(userId, operationId, 'single-player'),
+    ).rejects.toMatchObject({ code: 'not-found' })
+    const records = await db.select({ id: room.id }).from(room).where(eq(room.hostUserId, userId))
+    expect(records).toEqual([])
+  })
+
+  it('serializes create before join for the same user and keeps one active room', async () => {
+    const targetHost = await insertUser('create-join-target-host')
+    const actor = await insertUser('create-join-actor')
+    const target = await insertLobby(targetHost)
+
+    const [creation, joining] = await withUserLockBarrier(
+      actor,
+      async ({ release, waitForBlockedTransitions }) => {
+        const createPending = createRoomForOperation(actor, crypto.randomUUID(), 'multiplayer')
+        await waitForBlockedTransitions(1)
+        const joinPending = joinRoom(actor, target.code)
+        await waitForBlockedTransitions(2)
+        await release()
+        return Promise.allSettled([createPending, joinPending])
+      },
+    )
+
+    expect(creation.status).toBe('fulfilled')
+    expect(joining.status).toBe('rejected')
+    if (creation.status === 'fulfilled') {
+      createdRoomIds.push(creation.value.id)
+      expect(await activeRoomIds(actor)).toEqual([creation.value.id])
+    }
+    if (joining.status === 'rejected') {
+      expect(joining.reason).toMatchObject({ code: 'conflict' })
+    }
+  })
+
+  it('serializes join before create and maps the creation to the joined room', async () => {
+    const targetHost = await insertUser('join-create-target-host')
+    const actor = await insertUser('join-create-actor')
+    const target = await insertLobby(targetHost)
+    const operationId = crypto.randomUUID()
+
+    const [joining, creation] = await withUserLockBarrier(
+      actor,
+      async ({ release, waitForBlockedTransitions }) => {
+        const joinPending = joinRoom(actor, target.code)
+        await waitForBlockedTransitions(1)
+        const createPending = createRoomForOperation(actor, operationId, 'multiplayer')
+        await waitForBlockedTransitions(2)
+        await release()
+        return Promise.all([joinPending, createPending])
+      },
+    )
+
+    expect(creation.id).toBe(joining.id)
+    expect(joining.id).toBe(target.roomId)
+    await expect(roomForCreationOperation(actor, operationId, 'multiplayer')).resolves.toEqual(
+      creation,
+    )
+    expect(await activeRoomIds(actor)).toEqual([target.roomId])
+  })
+
+  it.each([
+    ['owner', 'join', 'competing'],
+    ['partner', 'join', 'competing'],
+    ['owner', 'create', 'competing'],
+    ['partner', 'create', 'competing'],
+    ['owner', 'join', 'party'],
+    ['partner', 'join', 'party'],
+    ['owner', 'create', 'party'],
+    ['partner', 'create', 'party'],
+  ] as const)(
+    'serializes party start against %s %s with %s first',
+    async (role, operation, first) => {
+      const owner = await insertUser(`party-race-${role}-${operation}-${first}-owner`)
+      const partner = await insertUser(`party-race-${role}-${operation}-${first}-partner`)
+      const targetHost = await insertUser(`party-race-${role}-${operation}-${first}-target`)
+      await insertParty(owner, partner)
+      const target = await insertLobby(targetHost)
+      const actor = role === 'owner' ? owner : partner
+
+      const [competing, starting] = await withUserLockBarrier(
+        actor,
+        async ({ release, waitForBlockedTransitions }) => {
+          const compete = () => {
+            return operation === 'join'
+              ? joinRoom(actor, target.code)
+              : createRoomForOperation(actor, crypto.randomUUID(), 'multiplayer')
+          }
+          const competingPending = first === 'competing' ? compete() : undefined
+          const startPending = first === 'party' ? startPartyRoom(owner) : undefined
+          await waitForBlockedTransitions(1)
+          const secondCompeting = competingPending ?? compete()
+          const secondStart = startPending ?? startPartyRoom(owner)
+          await waitForBlockedTransitions(2)
+          await release()
+          return Promise.allSettled([secondCompeting, secondStart])
+        },
+      )
+
+      if (first === 'competing') {
+        expect(competing.status).toBe('fulfilled')
+        expect(starting.status).toBe('rejected')
+        if (competing.status === 'fulfilled') {
+          if (operation === 'create') {
+            createdRoomIds.push(competing.value.id)
+          }
+          expect(await activeRoomIds(actor)).toEqual([competing.value.id])
+        }
+        if (starting.status === 'rejected') {
+          expect(starting.reason).toMatchObject({ code: 'conflict' })
+        }
+        expect((await activeRoomIds(role === 'owner' ? partner : owner)).length).toBe(0)
+      } else {
+        expect(starting.status).toBe('fulfilled')
+        if (starting.status === 'fulfilled') {
+          createdRoomIds.push(starting.value.id)
+          expect(await activeRoomIds(owner)).toEqual([starting.value.id])
+          expect(await activeRoomIds(partner)).toEqual([starting.value.id])
+          if (operation === 'create' && competing.status === 'fulfilled') {
+            expect(competing.value.id).toBe(starting.value.id)
+          }
+        }
+        if (operation === 'join') {
+          expect(competing.status).toBe('rejected')
+        } else {
+          expect(competing.status).toBe('fulfilled')
+        }
+      }
+    },
+  )
+
+  it('keeps foreign-key ownership writes compatible with coordinator locks', async () => {
+    const owner = await insertUser('ownership-fk-owner')
+    const previousHost = await insertUser('ownership-fk-previous-host')
+    const target = await insertLobby(previousHost)
+    const client = await admin.connect()
+    try {
+      await client.query('begin')
+      await client.query('select id from "user" where id = $1 for no key update', [owner])
+
+      const writes = Promise.all([
+        db.insert(party).values({ ownerUserId: owner }).returning({ id: party.id }),
+        db.update(room).set({ hostUserId: owner }).where(eq(room.id, target.roomId)),
+      ])
+      const [created] = await Promise.race([
+        writes,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error('Foreign-key key-share check blocked on the coordinator lock.'))
+          }, 1_000)
+        }),
+      ])
+      createdPartyIds.push(created[0]!.id)
+    } finally {
+      await client.query('rollback')
+      client.release()
+    }
+  })
+
+  it('rejects party-room reuse after a party member is replaced by a bot', async () => {
+    const owner = await insertUser('party-bot-replacement-owner')
+    const partner = await insertUser('party-bot-replacement-partner')
+    await insertParty(owner, partner)
+    const started = await startPartyRoom(owner)
+    createdRoomIds.push(started.id)
+    await db.update(room).set({ status: 'paused' }).where(eq(room.id, started.id))
+    await db.update(roomSeat).set({ connected: false }).where(eq(roomSeat.userId, partner))
+
+    await voteForBot(owner, started.id, 2)
+
+    await expect(startPartyRoom(owner)).rejects.toMatchObject({ code: 'conflict' })
+  })
+
+  it('enforces one active room for direct old-writer seat inserts and deletes', async () => {
+    const firstHost = await insertUser('old-writer-first-host')
+    const secondHost = await insertUser('old-writer-second-host')
+    const actor = await insertUser('old-writer-actor')
+    const first = await insertLobby(firstHost)
+    const second = await insertLobby(secondHost)
+
+    await admin.query(
+      'insert into room_seat (room_id, seat, user_id, connected) values ($1, 1, $2, true)',
+      [first.roomId, actor],
+    )
+    await expect(
+      admin.query(
+        'insert into room_seat (room_id, seat, user_id, connected) values ($1, 1, $2, true)',
+        [second.roomId, actor],
+      ),
+    ).rejects.toMatchObject({ code: '23505' })
+
+    await admin.query('delete from room_seat where room_id = $1 and user_id = $2', [
+      first.roomId,
+      actor,
+    ])
+    await admin.query(
+      'insert into room_seat (room_id, seat, user_id, connected) values ($1, 1, $2, true)',
+      [second.roomId, actor],
+    )
+    await expect(
+      db.select().from(activeRoomMembership).where(eq(activeRoomMembership.userId, actor)),
+    ).resolves.toMatchObject([{ roomId: second.roomId, userId: actor }])
+  })
+
+  it('enforces one active room for direct old-writer room status transitions', async () => {
+    const firstHost = await insertUser('old-status-first-host')
+    const firstPartner = await insertUser('old-status-first-partner')
+    const secondHost = await insertUser('old-status-second-host')
+    const firstRoom = await insertRoom({
+      hostUserId: firstHost,
+      partnerUserId: firstPartner,
+      lastSeenAt: new Date(),
+      status: 'finished',
+    })
+    const secondRoom = await insertRoom({
+      hostUserId: secondHost,
+      partnerUserId: firstPartner,
+      lastSeenAt: new Date(),
+      status: 'finished',
+    })
+
+    await admin.query("update room set status = 'playing' where id = $1", [firstRoom])
+    await expect(
+      admin.query("update room set status = 'playing' where id = $1", [secondRoom]),
+    ).rejects.toMatchObject({ code: '23505' })
+    await admin.query("update room set status = 'finished' where id = $1", [firstRoom])
+    await admin.query("update room set status = 'playing' where id = $1", [secondRoom])
+
+    expect(await activeRoomIds(firstPartner)).toEqual([secondRoom])
+  })
+
+  it('serializes old-writer seat inserts with room deactivation triggers', async () => {
+    const host = await insertUser('old-race-host')
+    const actor = await insertUser('old-race-actor')
+    const target = await insertLobby(host)
+    const client = await admin.connect()
+    try {
+      await client.query('begin')
+      await client.query("update room set status = 'finished' where id = $1", [target.roomId])
+      let inserted = false
+      const insertion = admin
+        .query(
+          'insert into room_seat (room_id, seat, user_id, connected) values ($1, 1, $2, true)',
+          [target.roomId, actor],
+        )
+        .then(() => {
+          inserted = true
+        })
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50)
+      })
+      expect(inserted).toBe(false)
+      await client.query('commit')
+      await insertion
+    } finally {
+      await client.query('rollback')
+      client.release()
+    }
+
+    await expect(
+      db.select().from(activeRoomMembership).where(eq(activeRoomMembership.userId, actor)),
+    ).resolves.toEqual([])
+  })
+
+  it('serializes create before a party rematch and leaves the finished target inactive', async () => {
+    const host = await insertUser('rematch-create-host')
+    const partner = await insertUser('rematch-create-partner')
+    const partyId = await insertParty(host, partner)
+    const game = createGame(createDeck(), DEFAULT_RULES)
+    game.phase = 'match-over'
+    game.score = [10, 0]
+    const finishedRoomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      game,
+      status: 'finished',
+      partyId,
+    })
+    await admin.query('insert into rematch_vote (room_id, user_id) values ($1, $2)', [
+      finishedRoomId,
+      partner,
+    ])
+
+    const [creation, rematch] = await withUserLockBarrier(
+      host,
+      async ({ release, waitForBlockedTransitions }) => {
+        const createPending = createRoomForOperation(host, crypto.randomUUID(), 'multiplayer')
+        await waitForBlockedTransitions(1)
+        const rematchPending = confirmRematch(host, finishedRoomId)
+        await waitForBlockedTransitions(2)
+        await release()
+        return Promise.allSettled([createPending, rematchPending])
+      },
+    )
+
+    expect(creation.status).toBe('fulfilled')
+    expect(rematch.status).toBe('rejected')
+    if (creation.status === 'fulfilled') {
+      createdRoomIds.push(creation.value.id)
+      expect(await activeRoomIds(host)).toEqual([creation.value.id])
+    }
+    const [finished] = await db
+      .select({ status: room.status })
+      .from(room)
+      .where(eq(room.id, finishedRoomId))
+    expect(finished.status).toBe('finished')
+  })
+
+  it('serializes a party rematch before create and maps creation to the target room', async () => {
+    const host = await insertUser('rematch-first-host')
+    const partner = await insertUser('rematch-first-partner')
+    const partyId = await insertParty(host, partner)
+    const game = createGame(createDeck(), DEFAULT_RULES)
+    game.phase = 'match-over'
+    game.score = [10, 0]
+    const roomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      game,
+      status: 'finished',
+      partyId,
+    })
+    await admin.query('insert into rematch_vote (room_id, user_id) values ($1, $2)', [
+      roomId,
+      partner,
+    ])
+
+    const [rematch, creation] = await withUserLockBarrier(
+      host,
+      async ({ release, waitForBlockedTransitions }) => {
+        const rematchPending = confirmRematch(host, roomId)
+        await waitForBlockedTransitions(1)
+        const createPending = createRoomForOperation(host, crypto.randomUUID(), 'multiplayer')
+        await waitForBlockedTransitions(2)
+        await release()
+        return Promise.all([rematchPending, createPending])
+      },
+    )
+
+    expect(rematch.status).toBe('playing')
+    expect(creation.id).toBe(roomId)
+    expect(await activeRoomIds(host)).toEqual([roomId])
+  })
+
+  it('serializes overlapping rematches by sorted participant locks', async () => {
+    const shared = await insertUser('overlapping-rematch-shared')
+    const firstPartner = await insertUser('overlapping-rematch-first')
+    const secondPartner = await insertUser('overlapping-rematch-second')
+    const firstParty = await insertParty(shared, firstPartner)
+    const secondParty = await insertOpenParty(secondPartner)
+    const firstGame = createGame(createDeck(), DEFAULT_RULES)
+    firstGame.phase = 'match-over'
+    firstGame.score = [10, 0]
+    const secondGame = createGame(createDeck(), DEFAULT_RULES)
+    secondGame.phase = 'match-over'
+    secondGame.score = [10, 0]
+    const firstRoom = await insertRoom({
+      hostUserId: shared,
+      partnerUserId: firstPartner,
+      lastSeenAt: new Date(),
+      game: firstGame,
+      status: 'finished',
+      partyId: firstParty,
+    })
+    const secondRoom = await insertRoom({
+      hostUserId: shared,
+      partnerUserId: secondPartner,
+      lastSeenAt: new Date(),
+      game: secondGame,
+      status: 'finished',
+      partyId: secondParty.id,
+    })
+    await admin.query(
+      `insert into rematch_vote (room_id, user_id)
+       values ($1, $2), ($3, $4)`,
+      [firstRoom, firstPartner, secondRoom, secondPartner],
+    )
+
+    const results = await withUserLockBarrier(
+      shared,
+      async ({ release, waitForBlockedTransitions }) => {
+        const firstPending = confirmRematch(shared, firstRoom)
+        await waitForBlockedTransitions(1)
+        const secondPending = confirmRematch(shared, secondRoom)
+        await waitForBlockedTransitions(2)
+        await release()
+        return Promise.allSettled([firstPending, secondPending])
+      },
+    )
+
+    expect(
+      results.filter(({ status }) => {
+        return status === 'fulfilled'
+      }),
+    ).toHaveLength(1)
+    expect(
+      results.filter(({ status }) => {
+        return status === 'rejected'
+      }),
+    ).toHaveLength(1)
+    expect(await activeRoomIds(shared)).toHaveLength(1)
+  })
+
+  it('allows an idempotent new-match retry when the active room is the finished target', async () => {
+    const host = await insertUser('finished-target-host')
+    const partner = await insertUser('finished-target-partner')
+    const game = createGame(createDeck(), DEFAULT_RULES)
+    game.phase = 'match-over'
+    game.score = [10, 0]
+    const roomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      game,
+      status: 'finished',
+    })
+    const command = {
+      roomId,
+      commandId: crypto.randomUUID(),
+      expectedVersion: 1,
+      action: { type: 'new-match' as const },
+    }
+
+    const transitioned = await submit(host, command)
+    const retried = await submit(host, command)
+
+    expect(transitioned.status).toBe('playing')
+    expect(retried).toEqual(transitioned)
+    expect(await activeRoomIds(host)).toEqual([roomId])
+  })
 
   it('returns the recorded party for a sequential same-invite retry', async () => {
     const owner = await insertUser('owner')
@@ -496,6 +1164,52 @@ describeIntegration('GameService.tick lock and race behavior', () => {
     expect(view?.seats).toHaveLength(4)
   })
 
+  it('prefers authoritative active membership over an old Worker finished timestamp', async () => {
+    const host = await insertUser('current-active-host')
+    const partner = await insertUser('current-active-partner')
+    const activeRoomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      updatedAt: new Date(),
+    })
+    const finishedRoomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      status: 'finished',
+      updatedAt: new Date(Date.now() - 60_000),
+    })
+
+    await admin.query("update room set updated_at = now() + interval '1 hour' where id = $1", [
+      finishedRoomId,
+    ])
+
+    await expect(currentRoom(host)).resolves.toMatchObject({ id: activeRoomId, status: 'playing' })
+  })
+
+  it('falls back to the latest finished historical room when no active membership exists', async () => {
+    const host = await insertUser('current-history-host')
+    const partner = await insertUser('current-history-partner')
+    const olderRoomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      status: 'finished',
+      updatedAt: new Date(Date.now() - 60_000),
+    })
+    const latestRoomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      status: 'finished',
+      updatedAt: new Date(),
+    })
+
+    expect(olderRoomId).not.toBe(latestRoomId)
+    await expect(currentRoom(host)).resolves.toMatchObject({ id: latestRoomId, status: 'finished' })
+  })
+
   it('locks the room, then loads children, inserts, and updates for a normal command', async () => {
     const host = await insertUser('host')
     const partner = await insertUser('partner')
@@ -595,14 +1309,40 @@ describeIntegration('GameService.tick lock and race behavior', () => {
       return confirmRematch(host, roomId)
     })
 
-    expect(statements).toHaveLength(4)
+    expect(statements).toHaveLength(6)
     expect(
       statements.filter((statement) => {
         return /^select /i.test(statement)
       }),
-    ).toHaveLength(2)
-    expect(statements[0]).toMatch(/for update of "room"/i)
+    ).toHaveLength(4)
+    expect(statements[1]).toMatch(/for no key update of "user"/i)
+    expect(statements[2]).toMatch(/for update of "room"/i)
     expect(view.rematch?.confirmations).toEqual([0])
+  })
+
+  it('keeps a recorded rematch vote idempotent when no transition is needed', async () => {
+    const host = await insertUser('idempotent-rematch-host')
+    const partner = await insertUser('idempotent-rematch-partner')
+    const partyId = await insertParty(host, partner)
+    const game = createGame(createDeck(), DEFAULT_RULES)
+    game.phase = 'match-over'
+    game.score = [10, 0]
+    const roomId = await insertRoom({
+      hostUserId: host,
+      partnerUserId: partner,
+      lastSeenAt: new Date(),
+      game,
+      status: 'finished',
+      partyId,
+    })
+
+    const first = await confirmRematch(host, roomId)
+    const active = await createRoomForOperation(host, crypto.randomUUID(), 'multiplayer')
+    createdRoomIds.push(active.id)
+    const retried = await confirmRematch(host, roomId)
+
+    expect(retried).toEqual(first)
+    expect(await activeRoomIds(host)).toEqual([active.id])
   })
 
   it('uses the locked snapshot for presence without bumping the game version', async () => {
@@ -618,13 +1358,13 @@ describeIntegration('GameService.tick lock and race behavior', () => {
       return setPresence(partner, roomId, false)
     })
 
-    expect(statements).toHaveLength(4)
+    expect(statements).toHaveLength(5)
     expect(
       statements.filter((statement) => {
         return /^select /i.test(statement)
       }),
-    ).toHaveLength(2)
-    expect(statements[0]).toMatch(/for update of "room"/i)
+    ).toHaveLength(3)
+    expect(statements[1]).toMatch(/for update of "room"/i)
     expect(view.version).toBe(1)
     expect(view.seats[2].connected).toBe(false)
   })
@@ -726,19 +1466,22 @@ describeIntegration('GameService.tick lock and race behavior', () => {
       partyId,
     })
 
-    await withRoomLockBarrier(roomId, async ({ client, release, waitForBlockedMutation }) => {
-      await client.query('insert into rematch_vote (room_id, user_id) values ($1, $2)', [
-        roomId,
-        host,
-      ])
-      const pending = confirmRematch(partner, roomId)
-      await waitForBlockedMutation()
-      await release(true)
-      const view = await pending
-      expect(view.game?.phase).not.toBe('match-over')
-      expect(view.rematch).toBeNull()
-      expect(view.version).toBe(2)
-    })
+    const [first, final] = await withUserLockBarrier(
+      host,
+      async ({ release, waitForBlockedTransitions }) => {
+        const firstPending = confirmRematch(host, roomId)
+        await waitForBlockedTransitions(1)
+        const finalPending = confirmRematch(partner, roomId)
+        await waitForBlockedTransitions(2)
+        await release()
+        return Promise.all([firstPending, finalPending])
+      },
+    )
+
+    expect(first.rematch?.confirmations).toEqual([0])
+    expect(final.game?.phase).not.toBe('match-over')
+    expect(final.rematch).toBeNull()
+    expect(final.version).toBe(3)
   })
 
   it('keeps a truly stale seat connected when its heartbeat commits before stale evaluation', async () => {

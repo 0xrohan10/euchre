@@ -1,13 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useRouter } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import { playableCardImageUrls } from '../card-assets'
 import { warmCardImages, type CardImageSessionCache } from '../card-image-loader'
-import { authClient } from '../lib/auth-client'
+import {
+  gameActionPendingLabel,
+  submitIdempotentCommand,
+  UnknownCommandOutcomeError,
+  type LiveConnectionState,
+  withRequestDeadline,
+} from '../interaction-feedback'
 import { hasNaturalTrump, legalCards, sortHand, SUITS, type Card } from '../game/card'
 import { teamName, teamOf, type Player } from '../game/player'
 import type { GameAction } from '../game/state'
 import {
   canPassCalling,
+  normalizeSubmitCommandResult,
   optimisticRoomAction,
   playerAt,
   relativePlayer,
@@ -25,7 +32,10 @@ import {
   voteForBotFn,
 } from '../server/game.functions'
 import { Brand } from './Brand'
+import { BlockingDialog } from './BlockingDialog'
 import { CardFace } from './CardFace'
+import { ConnectionStatus } from './ConnectionStatus'
+import { CopyInviteButton } from './CopyInviteButton'
 import { FarmerExchange } from './FarmerExchange'
 import { FiveScore } from './FiveScore'
 import { HeaderMenu } from './HeaderMenu'
@@ -41,6 +51,13 @@ const cardImageSessionCache: CardImageSessionCache = {
   completedUrls: new Set<string>(),
   inFlightUrls: new Set<string>(),
 }
+
+type GameOperation =
+  | { type: 'command'; label: string }
+  | { type: 'leave'; label: 'Leaving game…' }
+  | { type: 'return-to-party'; label: 'Returning to partnership…' }
+  | { type: 'rematch'; label: 'Confirming rematch…' }
+  | { type: 'vote'; label: 'Submitting vote…' }
 
 function collectedTrickCount(game: GameView, player: Player) {
   const faceUpWinner = game.phase === 'trick-complete' ? game.lastTrickWinner : null
@@ -78,16 +95,18 @@ function resultCopy(game: GameView) {
 
 export function GameTable({
   room: confirmedRoom,
+  connection,
   onRoom,
   onLeave,
+  onSignOut,
 }: {
   room: RoomView
+  connection: LiveConnectionState
   onRoom: (room: RoomView) => void
   onLeave: (leftParty?: boolean) => void
+  onSignOut: () => void
 }) {
-  const navigate = useNavigate()
-  const router = useRouter()
-  const [pending, setPending] = useState(false)
+  const [operation, setOperation] = useState<GameOperation | null>(null)
   const [pendingRoom, setPendingRoom] = useState<PendingRoomView | null>(null)
   const [error, setError] = useState('')
   const [alone, setAlone] = useState(false)
@@ -107,7 +126,9 @@ export function GameTable({
   const viewerTeam = teamOf(viewer)
   const opponentTeam = (1 - viewerTeam) as 0 | 1
   const result = resultCopy(game)
-  const isTurn = !pending && room.status === 'playing' && game.activePlayer === viewer
+  const actionsDisabled = operation !== null || !connection.snapshotTrusted
+  const viewerTurn = room.status === 'playing' && game.activePlayer === viewer
+  const isTurn = !actionsDisabled && viewerTurn
   const hand = sortHand(game.hand, game.trump)
   const legal =
     game.phase === 'playing' && game.trump
@@ -199,99 +220,135 @@ export function GameTable({
   }, [])
 
   async function act(action: GameAction) {
-    setPending(true)
+    if (actionsDisabled) {
+      return
+    }
+    setOperation({ type: 'command', label: gameActionPendingLabel(action) })
     setError('')
     const base = roomRef.current
     setPendingRoom({ baseVersion: base.version, room: optimisticRoomAction(base, action) })
+    const command = {
+      roomId: base.id,
+      commandId: crypto.randomUUID(),
+      expectedVersion: base.version,
+      action,
+      responseVersion: 2 as const,
+    }
     try {
-      const submit = (version: number) => {
-        return submitCommandFn({
-          data: {
-            roomId: base.id,
-            commandId: crypto.randomUUID(),
-            expectedVersion: version,
-            action,
-          },
-        })
-      }
-      let next: RoomView
-      try {
-        next = await submit(base.version)
-      } catch (first) {
-        const message = first instanceof Error ? first.message : String(first)
-        if (!/stale|version/i.test(message)) {
-          throw first
-        }
-        const fresh = await getRoomFn({ data: { roomId: base.id } })
-        onRoom(fresh)
-        next = await submit(fresh.version)
-      }
-      onRoom(next)
-      setPendingRoom(null)
-      setAlone(false)
-    } catch (err) {
-      setPendingRoom(null)
-      const message = err instanceof Error ? err.message : 'That action failed.'
-      setError(
-        /stale|version/i.test(message)
-          ? 'The table changed before that action. Your view was refreshed.'
-          : message,
+      const result = normalizeSubmitCommandResult(
+        await submitIdempotentCommand(command, (data) => {
+          return submitCommandFn({ data })
+        }),
       )
+      onRoom(result.room)
+      setPendingRoom(null)
+      if (result.status === 'stale') {
+        setError('The table changed before that action. Review the refreshed table and try again.')
+      } else {
+        setAlone(false)
+      }
+    } catch (cause) {
+      setPendingRoom(null)
+      if (cause instanceof UnknownCommandOutcomeError) {
+        setError(
+          'The action may have completed, but confirmation timed out. Wait for the table to refresh before trying again.',
+        )
+        return
+      }
+      setError('That action could not be completed. Review the table and try again.')
       try {
-        onRoom(await getRoomFn({ data: { roomId: roomRef.current.id } }))
+        onRoom(
+          await withRequestDeadline(() => {
+            return getRoomFn({ data: { roomId: roomRef.current.id } })
+          }),
+        )
       } catch {
         /* The SSE connection remains the fallback. */
       }
     } finally {
-      setPending(false)
+      setOperation(null)
     }
   }
 
   async function leave() {
-    setPending(true)
+    setOperation({ type: 'leave', label: 'Leaving game…' })
     setError('')
     try {
       if (partyGame) {
-        await leavePartyFn()
+        await withRequestDeadline(leavePartyFn)
       } else {
-        await leaveRoomFn({ data: { roomId: room.id } })
+        await withRequestDeadline(() => {
+          return leaveRoomFn({ data: { roomId: room.id } })
+        })
       }
       onLeave(partyGame)
     } catch {
-      setError('Could not leave this game.')
+      setError('Could not leave this game. Please try again.')
       setConfirmLeave(false)
     } finally {
-      setPending(false)
+      setOperation(null)
     }
   }
 
   async function returnToParty() {
-    setPending(true)
+    setOperation({ type: 'return-to-party', label: 'Returning to partnership…' })
     setError('')
     try {
-      await leaveRoomFn({ data: { roomId: room.id } })
+      await withRequestDeadline(() => {
+        return leaveRoomFn({ data: { roomId: room.id } })
+      })
       onLeave(false)
     } catch {
-      setError('Could not return to the partnership lobby.')
+      setError('Could not return to the partnership lobby. Please try again.')
     } finally {
-      setPending(false)
+      setOperation(null)
     }
   }
 
   async function confirmRematch() {
-    setPending(true)
+    setOperation({ type: 'rematch', label: 'Confirming rematch…' })
     setError('')
     try {
-      onRoom(await confirmRematchFn({ data: { roomId: room.id } }))
+      onRoom(
+        await withRequestDeadline(() => {
+          return confirmRematchFn({ data: { roomId: room.id } })
+        }),
+      )
     } catch {
-      setError('Could not confirm the rematch.')
+      setError('Could not confirm the rematch. Please try again.')
     } finally {
-      setPending(false)
+      setOperation(null)
+    }
+  }
+
+  async function voteForBot(approve: boolean) {
+    if (!room.disconnectVote || actionsDisabled) {
+      return
+    }
+    setOperation({ type: 'vote', label: 'Submitting vote…' })
+    setError('')
+    try {
+      onRoom(
+        await withRequestDeadline(() => {
+          return voteForBotFn({
+            data: {
+              roomId: room.id,
+              disconnectedSeat: room.disconnectVote!.disconnectedSeat,
+              approve,
+            },
+          })
+        }),
+      )
+    } catch {
+      setError('Could not submit your bot takeover vote. Please try again.')
+    } finally {
+      setOperation(null)
     }
   }
 
   const controls =
-    isTurn && (game.phase === 'exchanging' || game.phase === 'ordering' || game.phase === 'calling')
+    viewerTurn &&
+    (game.phase === 'exchanging' || game.phase === 'ordering' || game.phase === 'calling')
   const availableSuits = SUITS.filter((suit) => {
     return (
       game.phase === 'calling' &&
@@ -303,11 +360,12 @@ export function GameTable({
     game.exchangedPlayer === viewer &&
     !(game.phase === 'calling' && game.rules.stickDealer && viewer === game.dealer)
   const bidControls = controls && (
-    <div className="bid-controls">
+    <div className="bid-controls" aria-busy={operation?.type === 'command'}>
       {game.phase === 'exchanging' ? (
         <>
           <button
             className="primary-button"
+            disabled={actionsDisabled}
             onClick={() => {
               return void act({ type: 'exchange-kitty' })
             }}
@@ -316,6 +374,7 @@ export function GameTable({
           </button>
           <button
             className="quiet-button"
+            disabled={actionsDisabled}
             onClick={() => {
               return void act({ type: 'decline-exchange' })
             }}
@@ -328,6 +387,7 @@ export function GameTable({
           <button
             className="primary-button"
             disabled={
+              actionsDisabled ||
               exchangeRestricted ||
               (game.rules.requireNaturalTrump && !hasNaturalTrump(game.hand, game.upCard.suit))
             }
@@ -339,6 +399,7 @@ export function GameTable({
           </button>
           <button
             className="quiet-button pass-button"
+            disabled={actionsDisabled}
             onClick={() => {
               return void act({ type: 'pass' })
             }}
@@ -352,7 +413,7 @@ export function GameTable({
             {availableSuits.map((suit) => {
               return (
                 <button
-                  disabled={exchangeRestricted}
+                  disabled={actionsDisabled || exchangeRestricted}
                   className={suit === 'hearts' || suit === 'diamonds' ? 'red' : ''}
                   key={suit}
                   onClick={() => {
@@ -372,6 +433,7 @@ export function GameTable({
           ) && (
             <button
               className="quiet-button pass-button"
+              disabled={actionsDisabled}
               onClick={() => {
                 return void act({ type: 'pass' })
               }}
@@ -386,7 +448,7 @@ export function GameTable({
           <input
             type="checkbox"
             checked={alone}
-            disabled={exchangeRestricted}
+            disabled={actionsDisabled || exchangeRestricted}
             onChange={(event) => {
               return setAlone(event.target.checked)
             }}
@@ -405,17 +467,9 @@ export function GameTable({
             {singlePlayer ? 'Single player' : partyGame ? 'Partners vs bots' : 'Table'}
           </span>
           {!singlePlayer && !partyGame && (
-            <button
-              className="room-code"
-              onClick={() => {
-                return void navigator.clipboard.writeText(
-                  `${window.location.origin}/games/${room.code}`,
-                )
-              }}
-            >
-              {room.code}
-            </button>
+            <CopyInviteButton key={room.id} path={`/games/${room.code}`} label={room.code} />
           )}
+          <ConnectionStatus connection={connection} />
         </div>
         <HeaderMenu>
           <Link className="quiet-button" to="/history">
@@ -434,11 +488,9 @@ export function GameTable({
           )}
           <button
             className="quiet-button"
+            disabled={operation !== null}
             onClick={() => {
-              return void authClient.signOut().then(async () => {
-                await navigate({ to: '/sign-in', replace: true })
-                await router.invalidate()
-              })
+              onSignOut()
             }}
           >
             Sign out
@@ -469,12 +521,15 @@ export function GameTable({
           </div>
         </aside>
         <main className="table-wrap">
+          <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {operation?.label ?? ''}
+          </span>
           {error && (
             <p className="game-error" role="alert">
               {error}
             </p>
           )}
-          <section className="felt-table">
+          <section className="felt-table" aria-busy={operation?.type === 'command'}>
             {farmerExchange && (
               <FarmerExchange cards={farmerExchange.cards} player={farmerExchange.player} />
             )}
@@ -577,14 +632,13 @@ export function GameTable({
               </div>
             </div>
             {!room.disconnectVote &&
+              !confirmLeave &&
               (game.phase === 'hand-over' || game.phase === 'match-over') && (
                 <div className="table-result-scrim">
-                  <section
+                  <BlockingDialog
                     className="result-dialog"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="result-title"
-                    aria-describedby="result-description"
+                    labelledBy="result-title"
+                    describedBy="result-description"
                   >
                     <span className="eyebrow">
                       {game.phase === 'match-over' ? 'Match complete' : 'Hand complete'}
@@ -593,7 +647,14 @@ export function GameTable({
                     <p id="result-description" className="result-description">
                       {result.description}
                     </p>
-                    <div className="result-actions">
+                    <div
+                      className="result-actions"
+                      aria-busy={
+                        operation?.type === 'command' ||
+                        operation?.type === 'rematch' ||
+                        operation?.type === 'return-to-party'
+                      }
+                    >
                       {game.phase === 'match-over' && room.rematch ? (
                         <>
                           {room.seats.filter((seat) => {
@@ -602,7 +663,9 @@ export function GameTable({
                             <button
                               type="button"
                               className="primary-button"
-                              disabled={pending || room.rematch.confirmations.includes(viewer)}
+                              disabled={
+                                actionsDisabled || room.rematch.confirmations.includes(viewer)
+                              }
                               onClick={() => {
                                 return void confirmRematch()
                               }}
@@ -621,7 +684,7 @@ export function GameTable({
                           <button
                             type="button"
                             className="quiet-button leave-game-button"
-                            disabled={pending}
+                            disabled={actionsDisabled}
                             onClick={() => {
                               return void returnToParty()
                             }}
@@ -639,7 +702,7 @@ export function GameTable({
                                   ? 'quiet-button next-hand-button'
                                   : 'primary-button new-game-button'
                               }
-                              disabled={pending}
+                              disabled={actionsDisabled}
                               onClick={() => {
                                 return void act({
                                   type: game.phase === 'hand-over' ? 'next-hand' : 'new-match',
@@ -655,7 +718,7 @@ export function GameTable({
                             <button
                               type="button"
                               className="quiet-button leave-game-button"
-                              disabled={pending}
+                              disabled={actionsDisabled}
                               onClick={() => {
                                 return setConfirmLeave(true)
                               }}
@@ -666,60 +729,60 @@ export function GameTable({
                         </>
                       )}
                     </div>
-                  </section>
+                  </BlockingDialog>
                 </div>
               )}
           </section>
         </main>
       </div>
-      {viewingTricks !== null && (
-        <WonTricksDialog
-          name={seats.get(viewingTricks)?.name ?? `Player ${viewingTricks + 1}`}
-          trickCount={collectedTrickCount(game, viewingTricks)}
-          tricks={game.wonTricks[viewingTricks]}
-          onClose={() => {
-            setViewingTricks(null)
-          }}
-        />
-      )}
+      {viewingTricks !== null &&
+        !room.disconnectVote &&
+        !confirmLeave &&
+        game.phase !== 'hand-over' &&
+        game.phase !== 'match-over' && (
+          <WonTricksDialog
+            name={seats.get(viewingTricks)?.name ?? `Player ${viewingTricks + 1}`}
+            trickCount={collectedTrickCount(game, viewingTricks)}
+            tricks={game.wonTricks[viewingTricks]}
+            onClose={() => {
+              setViewingTricks(null)
+            }}
+          />
+        )}
       {room.disconnectVote && (
         <div className="settings-scrim">
-          <section className="settings-panel">
+          <BlockingDialog
+            className="settings-panel"
+            labelledBy="disconnect-vote-title"
+            describedBy="disconnect-vote-description"
+          >
             <div className="settings-header">
               <div>
                 <span className="eyebrow">Unanimous decision</span>
-                <h2>{seats.get(room.disconnectVote?.disconnectedSeat ?? -1)?.name} disconnected</h2>
+                <h2 id="disconnect-vote-title">
+                  {seats.get(room.disconnectVote?.disconnectedSeat ?? -1)?.name} disconnected
+                </h2>
               </div>
             </div>
-            <div className="settings-section">
-              <p>
+            <div className="settings-section" aria-busy={operation?.type === 'vote'}>
+              <p id="disconnect-vote-description">
                 Every connected human player must approve bot takeover. The player can reclaim their
                 seat whenever they return.
               </p>
               <button
                 className="primary-button"
+                disabled={actionsDisabled}
                 onClick={() => {
-                  return void voteForBotFn({
-                    data: {
-                      roomId: room.id,
-                      disconnectedSeat: room.disconnectVote!.disconnectedSeat,
-                      approve: true,
-                    },
-                  }).then(onRoom)
+                  return void voteForBot(true)
                 }}
               >
-                Approve bot takeover
+                {operation?.type === 'vote' ? 'Submitting vote…' : 'Approve bot takeover'}
               </button>
               <button
                 className="quiet-button"
+                disabled={actionsDisabled}
                 onClick={() => {
-                  return void voteForBotFn({
-                    data: {
-                      roomId: room.id,
-                      disconnectedSeat: room.disconnectVote!.disconnectedSeat,
-                      approve: false,
-                    },
-                  }).then(onRoom)
+                  return void voteForBot(false)
                 }}
               >
                 Keep waiting
@@ -729,16 +792,19 @@ export function GameTable({
                 approvals
               </p>
             </div>
-          </section>
+          </BlockingDialog>
         </div>
       )}
-      {confirmLeave && (
+      {confirmLeave && !room.disconnectVote && (
         <div className="settings-scrim">
-          <section
+          <BlockingDialog
             className="settings-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="leave-game-title"
+            labelledBy="leave-game-title"
+            onEscape={() => {
+              if (operation?.type !== 'leave') {
+                setConfirmLeave(false)
+              }
+            }}
           >
             <div className="settings-header">
               <div>
@@ -756,10 +822,10 @@ export function GameTable({
                     ? 'This match is complete. You’ll return to the lobby.'
                     : 'This match will be abandoned and cannot be resumed.'}
               </p>
-              <div className="dialog-actions">
+              <div className="dialog-actions" aria-busy={operation?.type === 'leave'}>
                 <button
                   className="quiet-button"
-                  disabled={pending}
+                  disabled={operation?.type === 'leave'}
                   onClick={() => {
                     return setConfirmLeave(false)
                   }}
@@ -768,16 +834,20 @@ export function GameTable({
                 </button>
                 <button
                   className="primary-button"
-                  disabled={pending}
+                  disabled={actionsDisabled}
                   onClick={() => {
                     return void leave()
                   }}
                 >
-                  {pending ? 'Leaving…' : partyGame ? 'Leave partnership' : 'Leave game'}
+                  {operation?.type === 'leave'
+                    ? 'Leaving…'
+                    : partyGame
+                      ? 'Leave partnership'
+                      : 'Leave game'}
                 </button>
               </div>
             </div>
-          </section>
+          </BlockingDialog>
         </div>
       )}
     </div>

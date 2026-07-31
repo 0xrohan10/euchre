@@ -2,33 +2,103 @@ import { createServerFn } from '@tanstack/react-start'
 import { Effect } from 'effect'
 import { authMiddleware } from '../lib/auth.middleware'
 import {
+  createRoomInput,
   joinPartyInput,
   joinRoomInput,
+  roomCreationInput,
   roomIdInput,
   rulesInput,
   submitCommandInput,
   voteForBotInput,
 } from '../lib/game.validation'
 import { GameService } from './game-service.server'
+import { submitCommandResponse } from './command-response.server'
 
 export const createRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator(rulesInput)
+  .validator(createRoomInput)
   .handler(({ data, context }) => {
+    const operationId = data.operationId ?? crypto.randomUUID()
+    if (data.legacy) {
+      return context.gameRuntime.runPromise(
+        Effect.flatMap(GameService, (games) => {
+          return games.createRoom(context.session.user.id, operationId, data.rules)
+        }),
+      )
+    }
     return context.gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
-        return games.createRoom(context.session.user.id, data)
+        const creation = games.createRoom(context.session.user.id, operationId, data.rules)
+        return creation.pipe(
+          Effect.map((room) => {
+            return { outcome: 'created' as const, room }
+          }),
+          Effect.catchTag('GameServiceError', (error) => {
+            if (error.code === 'database') {
+              return Effect.fail(error)
+            }
+            return Effect.flatMap(
+              games.hasRoomCreationOperation(context.session.user.id, operationId),
+              (recorded) => {
+                return recorded
+                  ? Effect.fail(error)
+                  : Effect.succeed({ outcome: 'rejected' as const })
+              },
+            )
+          }),
+        )
       }),
     )
   })
 
 export const createSinglePlayerRoomFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator(rulesInput)
+  .validator(createRoomInput)
+  .handler(({ data, context }) => {
+    const operationId = data.operationId ?? crypto.randomUUID()
+    if (data.legacy) {
+      return context.gameRuntime.runPromise(
+        Effect.flatMap(GameService, (games) => {
+          return games.createSinglePlayerRoom(context.session.user.id, operationId, data.rules)
+        }),
+      )
+    }
+    return context.gameRuntime.runPromise(
+      Effect.flatMap(GameService, (games) => {
+        const creation = games.createSinglePlayerRoom(
+          context.session.user.id,
+          operationId,
+          data.rules,
+        )
+        return creation.pipe(
+          Effect.map((room) => {
+            return { outcome: 'created' as const, room }
+          }),
+          Effect.catchTag('GameServiceError', (error) => {
+            if (error.code === 'database') {
+              return Effect.fail(error)
+            }
+            return Effect.flatMap(
+              games.hasRoomCreationOperation(context.session.user.id, operationId),
+              (recorded) => {
+                return recorded
+                  ? Effect.fail(error)
+                  : Effect.succeed({ outcome: 'rejected' as const })
+              },
+            )
+          }),
+        )
+      }),
+    )
+  })
+
+export const getRoomForCreationFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .validator(roomCreationInput)
   .handler(({ data, context }) => {
     return context.gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
-        return games.createSinglePlayerRoom(context.session.user.id, data)
+        return games.roomForCreationOperation(context.session.user.id, data.operationId, data.kind)
       }),
     )
   })
@@ -161,7 +231,13 @@ export const submitCommandFn = createServerFn({ method: 'POST' })
   .handler(({ data, context }) => {
     return context.gameRuntime.runPromise(
       Effect.flatMap(GameService, (games) => {
-        return games.submit(context.session.user.id, data)
+        return submitCommandResponse(
+          data.responseVersion,
+          games.submit(context.session.user.id, data),
+          () => {
+            return games.getRoom(context.session.user.id, data.roomId)
+          },
+        )
       }),
     )
   })

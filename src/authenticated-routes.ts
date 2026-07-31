@@ -92,7 +92,12 @@ export function createInviteExecutionRegistry(): InviteExecutionRegistry {
         return undefined
       }
       executed.add(navigationKey)
-      return operation()
+      try {
+        return await operation()
+      } catch (cause) {
+        executed.delete(navigationKey)
+        throw cause
+      }
     },
   }
 }

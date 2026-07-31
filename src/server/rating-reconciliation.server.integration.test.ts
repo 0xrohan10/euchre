@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import pg from 'pg'
 import {
@@ -21,6 +21,7 @@ describeIntegration('rating reconciliation', () => {
   const db = drizzle({ client: pool })
   const userIds: string[] = []
   const historyIds: string[] = []
+  let workSequence = 0
 
   beforeAll(async () => {
     await pool.query('truncate table rating_outbox, pending_rating, rated_match, player_rating')
@@ -94,7 +95,7 @@ describeIntegration('rating reconciliation', () => {
   async function createWork(
     source: 'legacy' | 'v2',
     players: [string, string, string, string],
-    createdAt = new Date(),
+    createdAt = new Date(Date.UTC(2000, 0, 1, 0, 0, 0, workSequence++)),
   ) {
     const historyId = crypto.randomUUID()
     historyIds.push(historyId)
@@ -194,6 +195,10 @@ describeIntegration('rating reconciliation', () => {
     const historyId = crypto.randomUUID()
     historyIds.push(historyId)
     await db.insert(gameHistory).values(historyValues(historyId, players))
+    await db
+      .update(pendingRating)
+      .set({ createdAt: new Date('2000-01-01T00:00:00.000Z') })
+      .where(eq(pendingRating.gameHistoryId, historyId))
 
     await reconcilePendingRatings(db, 1)
 
@@ -310,6 +315,7 @@ describeIntegration('rating reconciliation', () => {
         failureCode: ratingOutbox.failureCode,
       })
       .from(ratingOutbox)
+      .where(inArray(ratingOutbox.gameHistoryId, poison))
     expect(failures).toHaveLength(4)
     expect(
       failures

@@ -7,6 +7,16 @@ export function HeaderMenu({ children }: { children: ReactNode }) {
   const trayRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    const closeForBlockingDialog = () => {
+      setOpen(false)
+    }
+    window.addEventListener('blocking-dialog-open', closeForBlockingDialog)
+    return () => {
+      window.removeEventListener('blocking-dialog-open', closeForBlockingDialog)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!open) {
       return
     }
@@ -14,6 +24,24 @@ export function HeaderMenu({ children }: { children: ReactNode }) {
       if (event.key === 'Escape') {
         setOpen(false)
         toggleRef.current?.focus()
+        return
+      }
+      if (event.key !== 'Tab' || !trayRef.current) {
+        return
+      }
+      const controls = [
+        ...trayRef.current.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ),
+      ]
+      const first = controls[0]
+      const last = controls.at(-1)
+      if (first && last && event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (first && last && !event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -53,14 +81,7 @@ export function HeaderMenu({ children }: { children: ReactNode }) {
           <i />
         </span>
       </button>
-      {open && (
-        <div
-          className="header-menu-scrim"
-          onClick={() => {
-            setOpen(false)
-          }}
-        />
-      )}
+      {open && <div className="header-menu-scrim" onClick={close} />}
       <div
         ref={trayRef}
         id={panelId}

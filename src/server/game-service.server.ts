@@ -12,6 +12,7 @@ import {
   rematchVote,
   room,
   roomCommand,
+  roomCreation,
   roomSeat,
   user,
 } from '../db/schema'
@@ -44,9 +45,10 @@ import {
   persistRatingOutbox,
   type RatingQueueMessage,
 } from './rating-reconciliation.server'
+import { activeRoomConflicts, activeRoomForUser, lockActiveRoomUsers } from './active-room.server'
 
 export class GameServiceError extends Data.TaggedError('GameServiceError')<{
-  readonly code: 'not-found' | 'forbidden' | 'conflict' | 'invalid' | 'database'
+  readonly code: 'not-found' | 'forbidden' | 'conflict' | 'stale' | 'invalid' | 'database'
   readonly message: string
 }> {}
 
@@ -58,11 +60,25 @@ type SubmitCommand = {
 }
 
 type GameServiceShape = {
-  createRoom: (userId: string, rules: GameRules) => Effect.Effect<RoomView, GameServiceError>
-  createSinglePlayerRoom: (
+  createRoom: (
     userId: string,
+    operationId: string,
     rules: GameRules,
   ) => Effect.Effect<RoomView, GameServiceError>
+  createSinglePlayerRoom: (
+    userId: string,
+    operationId: string,
+    rules: GameRules,
+  ) => Effect.Effect<RoomView, GameServiceError>
+  roomForCreationOperation: (
+    userId: string,
+    operationId: string,
+    kind: 'multiplayer' | 'single-player',
+  ) => Effect.Effect<RoomView | null, GameServiceError>
+  hasRoomCreationOperation: (
+    userId: string,
+    operationId: string,
+  ) => Effect.Effect<boolean, GameServiceError>
   currentParty: (userId: string) => Effect.Effect<PartyView | null, GameServiceError>
   createParty: (userId: string) => Effect.Effect<PartyView, GameServiceError>
   joinParty: (userId: string, inviteCode: string) => Effect.Effect<PartyView, GameServiceError>
@@ -140,6 +156,59 @@ type TickSeat = Pick<
   typeof roomSeat.$inferSelect,
   'userId' | 'seat' | 'connected' | 'controller' | 'lastSeenAt'
 >
+
+function seatedUserIds(seats: readonly Pick<typeof roomSeat.$inferSelect, 'userId'>[]): string[] {
+  return seats.flatMap((seat) => {
+    return seat.userId ? [seat.userId] : []
+  })
+}
+
+function participantSignature(
+  seats: readonly Pick<
+    typeof roomSeat.$inferSelect,
+    'connected' | 'controller' | 'seat' | 'userId'
+  >[],
+): string {
+  return seats
+    .filter((seat) => {
+      return seat.userId !== null
+    })
+    .map((seat) => {
+      return `${seat.seat}:${seat.userId}:${seat.controller}:${seat.connected}`
+    })
+    .sort()
+    .join('|')
+}
+
+async function lockUsersAndRejectActiveRoomConflicts(
+  database: Pick<Database, 'select'>,
+  userIds: readonly string[],
+  targetRoomId?: string,
+): Promise<void> {
+  const lockedUserIds = await lockTransitionUsers(database, userIds)
+  await rejectActiveRoomConflicts(database, lockedUserIds, targetRoomId)
+}
+
+async function lockTransitionUsers(
+  database: Pick<Database, 'select'>,
+  userIds: readonly string[],
+): Promise<string[]> {
+  const lockedUserIds = await lockActiveRoomUsers(database, userIds)
+  if (lockedUserIds.length !== new Set(userIds).size) {
+    throw new DomainError('not-found', 'A player account no longer exists.')
+  }
+  return lockedUserIds
+}
+
+async function rejectActiveRoomConflicts(
+  database: Pick<Database, 'select'>,
+  userIds: readonly string[],
+  targetRoomId?: string,
+): Promise<void> {
+  if ((await activeRoomConflicts(database, userIds, targetRoomId)).length > 0) {
+    throw new DomainError('conflict', 'A player is already seated at another active table.')
+  }
+}
 function ratingModeForSeats(
   seats: readonly Pick<typeof roomSeat.$inferSelect, 'userId' | 'controller'>[],
 ): RatingMode {
@@ -449,7 +518,12 @@ const createGameService = (
                   view: viewFromSnapshot(userId, snapshot),
                 }
               }
-              return { kind: 'mutate' as const }
+              return {
+                kind: 'mutate' as const,
+                participantSignature: participantSignature(preflightSeats),
+                status: preflightRoom.status,
+                userIds: seatedUserIds(preflightSeats),
+              }
             },
             { isolationLevel: 'repeatable read' },
           )
@@ -459,10 +533,20 @@ const createGameService = (
 
           const ratingSignals: string[] = []
           const result = await db.transaction(async (tx) => {
+            if (preflight.status === 'finished') {
+              await lockUsersAndRejectActiveRoomConflicts(tx, preflight.userIds, roomId)
+            }
             const lockedNow = new Date()
             const snapshot = await loadRoomSnapshot(tx, roomId, { forUpdate: true })
             viewFromSnapshot(userId, snapshot)
             const { room: record, seats } = snapshot!
+            if (
+              (preflight.status === 'finished' &&
+                participantSignature(seats) !== preflight.participantSignature) ||
+              (preflight.status !== 'finished' && record.status === 'finished')
+            ) {
+              throw new DomainError('conflict', 'Table membership changed. Try again.')
+            }
             const caller = seats.find((seat) => {
               return seat.userId === userId
             })
@@ -902,18 +986,29 @@ const createGameService = (
       return Effect.tryPromise({
         try: () => {
           return db.transaction(async (tx) => {
-            const [membership] = await tx
+            const [membershipPreflight] = await tx
               .select()
               .from(partyMember)
               .where(eq(partyMember.userId, userId))
               .limit(1)
-            if (!membership) {
+            if (!membershipPreflight) {
               throw new DomainError('not-found', 'Partnership not found.')
             }
+            const memberPreflight = await tx
+              .select()
+              .from(partyMember)
+              .where(eq(partyMember.partyId, membershipPreflight.partyId))
+              .orderBy(partyMember.joinedAt)
+            const lockedUserIds = await lockTransitionUsers(
+              tx,
+              memberPreflight.map((member) => {
+                return member.userId
+              }),
+            )
             const [record] = await tx
               .select()
               .from(party)
-              .where(eq(party.id, membership.partyId))
+              .where(eq(party.id, membershipPreflight.partyId))
               .for('update', { of: party })
               .limit(1)
             if (!record || record.ownerUserId !== userId) {
@@ -924,6 +1019,16 @@ const createGameService = (
               .from(partyMember)
               .where(eq(partyMember.partyId, record.id))
               .orderBy(partyMember.joinedAt)
+            if (
+              members
+                .map(({ userId: memberUserId }) => {
+                  return memberUserId
+                })
+                .sort()
+                .join('|') !== lockedUserIds.join('|')
+            ) {
+              throw new DomainError('conflict', 'Partnership membership changed. Try again.')
+            }
             if (members.length !== 2) {
               throw new DomainError('conflict', 'Invite a partner before starting a match.')
             }
@@ -933,7 +1038,23 @@ const createGameService = (
               .where(and(eq(room.partyId, record.id), inArray(room.status, ['playing', 'paused'])))
               .orderBy(desc(room.updatedAt))
               .limit(1)
+            await rejectActiveRoomConflicts(tx, lockedUserIds, activeRoom?.id)
             if (activeRoom) {
+              const activeHumans = await tx
+                .select({ userId: roomSeat.userId })
+                .from(roomSeat)
+                .where(and(eq(roomSeat.roomId, activeRoom.id), eq(roomSeat.controller, 'human')))
+              const activeHumanUserIds = activeHumans
+                .flatMap(({ userId: activeUserId }) => {
+                  return activeUserId ? [activeUserId] : []
+                })
+                .sort()
+              if (activeHumanUserIds.join('|') !== lockedUserIds.join('|')) {
+                throw new DomainError(
+                  'conflict',
+                  'The active partnership table no longer matches the current party.',
+                )
+              }
               return viewRoom(userId, activeRoom.id, tx)
             }
             const partner = members.find((member) => {
@@ -993,28 +1114,94 @@ const createGameService = (
         catch: failure,
       })
     }),
-    createRoom: Effect.fn('GameService.createRoom')((userId: string, rules: GameRules) => {
-      return Effect.tryPromise({
-        try: () => {
-          return db.transaction(async (tx) => {
-            const [created] = await tx
-              .insert(room)
-              .values({ code: randomCode(), hostUserId: userId, rules })
-              .returning()
-            await tx
-              .insert(roomSeat)
-              .values({ roomId: created.id, seat: 0, userId, connected: true })
-            return viewRoom(userId, created.id, tx)
-          })
-        },
-        catch: failure,
-      })
-    }),
-    createSinglePlayerRoom: Effect.fn('GameService.createSinglePlayerRoom')(
-      (userId: string, rules: GameRules) => {
+    createRoom: Effect.fn('GameService.createRoom')(
+      (userId: string, operationId: string, rules: GameRules) => {
         return Effect.tryPromise({
           try: () => {
             return db.transaction(async (tx) => {
+              await lockTransitionUsers(tx, [userId])
+              const [claim] = await tx
+                .insert(roomCreation)
+                .values({ userId, operationId, operationKind: 'multiplayer' })
+                .onConflictDoNothing()
+                .returning({ operationId: roomCreation.operationId })
+              if (!claim) {
+                const [existing] = await tx
+                  .select()
+                  .from(roomCreation)
+                  .where(
+                    and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+                  )
+                  .limit(1)
+                if (!existing || existing.operationKind !== 'multiplayer' || !existing.roomId) {
+                  throw new DomainError('conflict', 'Room creation operation does not match.')
+                }
+                return viewRoom(userId, existing.roomId, tx)
+              }
+              const activeRoom = await activeRoomForUser(tx, userId)
+              if (activeRoom) {
+                await tx
+                  .update(roomCreation)
+                  .set({ roomId: activeRoom.id })
+                  .where(
+                    and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+                  )
+                return viewRoom(userId, activeRoom.id, tx)
+              }
+              const [created] = await tx
+                .insert(room)
+                .values({ code: randomCode(), hostUserId: userId, rules })
+                .returning()
+              await tx
+                .insert(roomSeat)
+                .values({ roomId: created.id, seat: 0, userId, connected: true })
+              await tx
+                .update(roomCreation)
+                .set({ roomId: created.id })
+                .where(
+                  and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+                )
+              return viewRoom(userId, created.id, tx)
+            })
+          },
+          catch: failure,
+        })
+      },
+    ),
+    createSinglePlayerRoom: Effect.fn('GameService.createSinglePlayerRoom')(
+      (userId: string, operationId: string, rules: GameRules) => {
+        return Effect.tryPromise({
+          try: () => {
+            return db.transaction(async (tx) => {
+              await lockTransitionUsers(tx, [userId])
+              const [claim] = await tx
+                .insert(roomCreation)
+                .values({ userId, operationId, operationKind: 'single-player' })
+                .onConflictDoNothing()
+                .returning({ operationId: roomCreation.operationId })
+              if (!claim) {
+                const [existing] = await tx
+                  .select()
+                  .from(roomCreation)
+                  .where(
+                    and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+                  )
+                  .limit(1)
+                if (!existing || existing.operationKind !== 'single-player' || !existing.roomId) {
+                  throw new DomainError('conflict', 'Room creation operation does not match.')
+                }
+                return viewRoom(userId, existing.roomId, tx)
+              }
+              const activeRoom = await activeRoomForUser(tx, userId)
+              if (activeRoom) {
+                await tx
+                  .update(roomCreation)
+                  .set({ roomId: activeRoom.id })
+                  .where(
+                    and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+                  )
+                return viewRoom(userId, activeRoom.id, tx)
+              }
               const seatValues = [
                 {
                   roomId: '',
@@ -1062,8 +1249,56 @@ const createGameService = (
                 { roomId: created.id, seat: 2, controller: 'bot' },
                 { roomId: created.id, seat: 3, controller: 'bot' },
               ])
+              await tx
+                .update(roomCreation)
+                .set({ roomId: created.id })
+                .where(
+                  and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+                )
               return viewRoom(userId, created.id, tx)
             })
+          },
+          catch: failure,
+        })
+      },
+    ),
+    roomForCreationOperation: Effect.fn('GameService.roomForCreationOperation')(
+      (userId: string, operationId: string, kind: 'multiplayer' | 'single-player') => {
+        return Effect.tryPromise({
+          try: () => {
+            return db.transaction(async (tx) => {
+              const [creation] = await tx
+                .select()
+                .from(roomCreation)
+                .where(
+                  and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+                )
+                .limit(1)
+              if (!creation) {
+                return null
+              }
+              if (creation.operationKind !== kind) {
+                throw new DomainError('conflict', 'Room creation operation does not match.')
+              }
+              return creation.roomId ? viewRoom(userId, creation.roomId, tx) : null
+            })
+          },
+          catch: failure,
+        })
+      },
+    ),
+    hasRoomCreationOperation: Effect.fn('GameService.hasRoomCreationOperation')(
+      (userId: string, operationId: string) => {
+        return Effect.tryPromise({
+          try: async () => {
+            const [creation] = await db
+              .select({ operationId: roomCreation.operationId })
+              .from(roomCreation)
+              .where(
+                and(eq(roomCreation.userId, userId), eq(roomCreation.operationId, operationId)),
+              )
+              .limit(1)
+            return creation !== undefined
           },
           catch: failure,
         })
@@ -1073,13 +1308,22 @@ const createGameService = (
       return Effect.tryPromise({
         try: () => {
           return db.transaction(async (tx) => {
+            const [target] = await tx
+              .select({ id: room.id })
+              .from(room)
+              .where(eq(room.code, code.toUpperCase()))
+              .limit(1)
+            if (!target) {
+              throw new DomainError('not-found', 'Invite code not found.')
+            }
+            await lockUsersAndRejectActiveRoomConflicts(tx, [userId], target.id)
             const [record] = await tx
               .select()
               .from(room)
-              .where(eq(room.code, code.toUpperCase()))
+              .where(eq(room.id, target.id))
               .for('update', { of: room })
               .limit(1)
-            if (!record) {
+            if (!record || record.code !== code.toUpperCase()) {
               throw new DomainError('not-found', 'Invite code not found.')
             }
             const seats = await tx
@@ -1220,6 +1464,16 @@ const createGameService = (
         try: async () => {
           const ratingSignals: string[] = []
           const result = await db.transaction(async (tx) => {
+            let rematchParticipants: string | undefined
+            if (command.action.type === 'new-match') {
+              const preflightSeats = await tx
+                .select()
+                .from(roomSeat)
+                .where(eq(roomSeat.roomId, command.roomId))
+                .orderBy(roomSeat.seat)
+              rematchParticipants = participantSignature(preflightSeats)
+              await lockTransitionUsers(tx, seatedUserIds(preflightSeats))
+            }
             const snapshot = await loadRoomSnapshot(tx, command.roomId, {
               commandId: command.commandId,
               forUpdate: true,
@@ -1238,14 +1492,23 @@ const createGameService = (
             if (snapshot.command) {
               return viewFromSnapshot(userId, snapshot)
             }
+            if (
+              rematchParticipants !== undefined &&
+              participantSignature(seats) !== rematchParticipants
+            ) {
+              throw new DomainError('conflict', 'Table membership changed. Try the rematch again.')
+            }
+            if (command.action.type === 'new-match') {
+              await rejectActiveRoomConflicts(tx, seatedUserIds(seats), command.roomId)
+            }
+            if (record.version !== command.expectedVersion) {
+              throw new DomainError('stale', 'Your game view is stale.')
+            }
             if (!acceptsRoomAction(record.status, record.game.phase, command.action.type)) {
               throw new DomainError(
                 'conflict',
                 'That action is not available in the current game state.',
               )
-            }
-            if (record.version !== command.expectedVersion) {
-              throw new DomainError('conflict', 'Your game view is stale.')
             }
             if (actor.controller !== 'human') {
               throw new DomainError('forbidden', 'This seat is currently controlled by a bot.')
@@ -1467,8 +1730,18 @@ const createGameService = (
         try: async () => {
           const ratingSignals: string[] = []
           const result = await db.transaction(async (tx) => {
+            const preflightSeats = await tx
+              .select()
+              .from(roomSeat)
+              .where(eq(roomSeat.roomId, roomId))
+              .orderBy(roomSeat.seat)
+            const rematchParticipants = participantSignature(preflightSeats)
+            await lockTransitionUsers(tx, seatedUserIds(preflightSeats))
             const snapshot = await loadRoomSnapshot(tx, roomId, { forUpdate: true })
             const record = snapshot?.room
+            if (snapshot && participantSignature(snapshot.seats) !== rematchParticipants) {
+              throw new DomainError('conflict', 'Table membership changed. Try the rematch again.')
+            }
             if (
               !snapshot ||
               !record?.partyId ||
@@ -1491,9 +1764,10 @@ const createGameService = (
               throw new DomainError('conflict', 'A partner is required for a rematch.')
             }
             await tx.insert(rematchVote).values({ roomId, userId }).onConflictDoNothing()
-            const votes = snapshot.rematchVotes.some((vote) => {
+            const previouslyConfirmed = snapshot.rematchVotes.some((vote) => {
               return vote.userId === userId
             })
+            const votes = previouslyConfirmed
               ? snapshot.rematchVotes
               : [...snapshot.rematchVotes, { roomId, userId, createdAt: new Date() }]
             snapshot.rematchVotes = votes
@@ -1504,6 +1778,7 @@ const createGameService = (
                 })
               })
             ) {
+              await rejectActiveRoomConflicts(tx, seatedUserIds(seats), roomId)
               const gameHistoryId = await recordCompletedMatch(record, record.game, seats, tx)
               if (gameHistoryId) {
                 ratingSignals.push(gameHistoryId)
@@ -1531,7 +1806,7 @@ const createGameService = (
                 version: record.version + 1,
                 updatedAt,
               }
-            } else {
+            } else if (!previouslyConfirmed) {
               const updatedAt = new Date()
               await tx
                 .update(room)
@@ -1552,8 +1827,35 @@ const createGameService = (
         return Effect.tryPromise({
           try: async () => {
             return db.transaction(async (tx) => {
+              const [preflightRoom] = await tx
+                .select({ status: room.status })
+                .from(room)
+                .where(eq(room.id, roomId))
+                .limit(1)
+              let presenceParticipants: string | undefined
+              if (preflightRoom?.status === 'finished') {
+                const preflightSeats = await tx
+                  .select()
+                  .from(roomSeat)
+                  .where(eq(roomSeat.roomId, roomId))
+                  .orderBy(roomSeat.seat)
+                presenceParticipants = participantSignature(preflightSeats)
+                await lockUsersAndRejectActiveRoomConflicts(
+                  tx,
+                  seatedUserIds(preflightSeats),
+                  roomId,
+                )
+              }
               const snapshot = await loadRoomSnapshot(tx, roomId, { forUpdate: true })
               const record = snapshot?.room
+              if (
+                snapshot &&
+                ((presenceParticipants !== undefined &&
+                  participantSignature(snapshot.seats) !== presenceParticipants) ||
+                  (preflightRoom?.status !== 'finished' && record?.status === 'finished'))
+              ) {
+                throw new DomainError('conflict', 'Table membership changed. Try again.')
+              }
               const seat = snapshot?.seats.find((seat) => {
                 return seat.userId === userId
               })

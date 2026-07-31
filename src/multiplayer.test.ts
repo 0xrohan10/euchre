@@ -7,6 +7,7 @@ import {
   advanceBot,
   canPassCalling,
   eligibleBotVoters,
+  normalizeSubmitCommandResult,
   optimisticRoomAction,
   playerAt,
   projectGame,
@@ -17,6 +18,16 @@ import {
   type RoomView,
   type SeatView,
 } from './multiplayer'
+
+it('accepts both legacy applied room responses and typed stale responses', () => {
+  const room = { id: 'room', status: 'playing' } as RoomView
+
+  expect(normalizeSubmitCommandResult(room)).toEqual({ status: 'applied', room })
+  expect(normalizeSubmitCommandResult({ status: 'stale', room })).toEqual({
+    status: 'stale',
+    room,
+  })
+})
 
 it('projects only the authenticated player hand', () => {
   const game = createGame(createDeck())
