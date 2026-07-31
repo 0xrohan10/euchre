@@ -49,5 +49,8 @@ export default defineConfig(({ mode }) => {
           : {}),
       },
     },
+    test: {
+      fileParallelism: process.env.RUN_DB_INTEGRATION !== '1',
+    },
   }
 })

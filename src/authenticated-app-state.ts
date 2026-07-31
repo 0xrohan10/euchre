@@ -18,3 +18,14 @@ export function isCurrentRoomStreamEvent(
 ): boolean {
   return activeRoomId === effectRoomId && eventRoomId === effectRoomId
 }
+
+export function isCurrentLobbyStreamEvent(effectEpoch: number, currentEpoch: number): boolean {
+  return effectEpoch === currentEpoch
+}
+
+export function shouldInvalidateLobbyEpoch(
+  currentPartyId: string | null,
+  nextPartyId: string | null,
+): boolean {
+  return currentPartyId !== nextPartyId
+}

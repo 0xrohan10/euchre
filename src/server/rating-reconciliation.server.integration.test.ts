@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import pg from 'pg'
@@ -21,6 +21,10 @@ describeIntegration('rating reconciliation', () => {
   const db = drizzle({ client: pool })
   const userIds: string[] = []
   const historyIds: string[] = []
+
+  beforeAll(async () => {
+    await pool.query('truncate table rating_outbox, pending_rating, rated_match, player_rating')
+  })
 
   const handResults: HandResult[] = Array.from({ length: 5 }, (_, index) => {
     return {
