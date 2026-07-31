@@ -1,6 +1,8 @@
 import { Effect, type ManagedRuntime } from 'effect'
 import { env, waitUntil } from 'cloudflare:workers'
 import type { Database } from '../db/index.server'
+import { and, eq } from 'drizzle-orm'
+import { roomSeat } from '../db/schema'
 import { createDb } from '../db/index.server'
 import { createAuth } from '../lib/auth.server'
 import type { PartyView, RoomView } from '../multiplayer'
@@ -10,6 +12,11 @@ import {
   type LiveAdmissionRenewal,
   type LiveStreamError,
 } from './live-stream.server'
+import {
+  roomCoordinatorMode,
+  shadowRoomCoordinator,
+  shouldUseRoomCoordinator,
+} from './room-coordinator-policy'
 
 export type LobbySnapshot = {
   party: PartyView | null
@@ -22,6 +29,7 @@ type LiveConnection<T> = {
 }
 
 export type LiveAdmissionLease = {
+  leaseId?: string
   renew: () => Promise<LiveAdmissionRenewal>
   releaseOnce: () => Promise<void>
   release: () => Promise<void>
@@ -32,12 +40,16 @@ export type LiveEventHandlerDependencies<Context> = {
   userId: (context: Context) => string
   openLobby: (context: Context) => LiveConnection<LobbySnapshot>
   openRoom: (context: Context, roomId: string) => LiveConnection<RoomView>
+  openRoomReadOnly?: (context: Context, roomId: string) => LiveConnection<RoomView>
   waitUntil?: (promise: Promise<void>) => void
   acquireAdmission?: (
     context: Context,
     scope: 'lobby' | 'room',
     pageId: string,
   ) => Promise<LiveAdmissionLease | null>
+  authorizeRoom?: (context: Context, roomId: string) => Promise<boolean>
+  roomCoordinatorSelection?: (roomId: string) => 'legacy' | 'shadow' | 'coordinator'
+  connectRoomCoordinator?: (roomId: string, request: RequestInit) => Promise<Response>
 }
 
 export type LiveStreamRegistry = {
@@ -56,7 +68,7 @@ const LIVE_ADMISSION_RELEASE_ATTEMPTS = 4
 const LIVE_ADMISSION_RELEASE_BASE_DELAY_MS = 100
 export const LIVE_ADMISSION_FETCH_TIMEOUT_MS = 2_000
 
-type AdmissionAction = 'acquire' | 'renew' | 'release'
+type AdmissionAction = 'acquire' | 'transfer' | 'renew' | 'release'
 type AdmissionFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 type AdmissionInvoke = (action: AdmissionAction, body: object) => Promise<Response>
 
@@ -217,12 +229,13 @@ export async function acquireLiveAdmission(
   fetchAdmission: AdmissionFetch,
   scope: 'lobby' | 'room',
   pageId: string,
+  userId = 'test-user',
 ): Promise<LiveAdmissionLease | null> {
   const proposedLeaseId = crypto.randomUUID()
   const invoke = createAdmissionInvoke(fetchAdmission)
   let acquired: Response
   try {
-    acquired = await invoke('acquire', { scope, pageId, leaseId: proposedLeaseId })
+    acquired = await invoke('acquire', { userId, scope, pageId, leaseId: proposedLeaseId })
   } catch (error) {
     await releaseLiveAdmission(invoke, proposedLeaseId).catch(() => {})
     throw error
@@ -253,6 +266,7 @@ export async function acquireLiveAdmission(
   }
   const leaseId = result.leaseId
   return {
+    leaseId,
     async renew() {
       const response = await invoke('renew', { leaseId })
       return parseLiveAdmissionRenewal(response)
@@ -337,6 +351,14 @@ export function createLiveEventHandlers<Context>(
       if (!pageId) {
         return new Response('Invalid page identity', { status: 400 })
       }
+      if (dependencies.authorizeRoom) {
+        if (!UUID_PATTERN.test(roomId)) {
+          return new Response('Invalid room', { status: 400 })
+        }
+        if (!(await dependencies.authorizeRoom(authentication, roomId))) {
+          return new Response('Room not found', { status: 404 })
+        }
+      }
       let admission: LiveAdmissionLease | null | undefined
       try {
         admission = await dependencies.acquireAdmission?.(authentication, 'room', pageId)
@@ -346,12 +368,105 @@ export function createLiveEventHandlers<Context>(
       if (dependencies.acquireAdmission && !admission) {
         return new Response('Too many live streams', { status: 429 })
       }
-      const connection = dependencies.openRoom(authentication, roomId)
+      const mode = roomCoordinatorMode(env.ROOM_COORDINATOR_MODE)
+      const percentage = Number(env.ROOM_COORDINATOR_PERCENTAGE ?? '0')
+      const selection =
+        dependencies.roomCoordinatorSelection?.(roomId) ??
+        (shouldUseRoomCoordinator(roomId, mode, percentage)
+          ? 'coordinator'
+          : shadowRoomCoordinator(roomId, mode, percentage)
+            ? 'shadow'
+            : 'legacy')
+      if (selection === 'shadow') {
+        waitUntil(
+          env.ROOM_COORDINATOR.getByName(roomId)
+            .fetch('https://room-coordinator/poke', {
+              method: 'POST',
+              headers: { 'x-room-id': roomId },
+            })
+            .then(() => {
+              return undefined
+            })
+            .catch(() => {
+              return undefined
+            }),
+        )
+      }
+      if (admission?.leaseId && selection === 'coordinator') {
+        const acquireFreshAdmission = async () => {
+          try {
+            admission = await dependencies.acquireAdmission?.(authentication, 'room', pageId)
+          } catch {
+            return new Response('Stream admission unavailable', { status: 503 })
+          }
+          return admission ? undefined : new Response('Too many live streams', { status: 429 })
+        }
+        try {
+          const connect =
+            dependencies.connectRoomCoordinator ??
+            ((selectedRoomId: string, init: RequestInit) => {
+              return env.ROOM_COORDINATOR.getByName(selectedRoomId).fetch(
+                'https://room-coordinator/connect',
+                init,
+              )
+            })
+          const response = await connect(roomId, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              userId,
+              pageId,
+              leaseId: admission.leaseId,
+              legacy: isLegacyLiveStreamRequest(request),
+            }),
+            signal: request.signal,
+          })
+          if (response.ok) {
+            return response
+          }
+          if (response.headers.get('x-room-coordinator-retry') === 'ownership') {
+            return new Response('Room coordinator handover in progress', {
+              status: 503,
+              headers: { 'Retry-After': response.headers.get('Retry-After') ?? '1' },
+            })
+          }
+          if (response.headers.get('x-room-coordinator-admission') === 'released') {
+            const unavailable = await acquireFreshAdmission()
+            if (unavailable) {
+              return unavailable
+            }
+          } else if (response.headers.get('x-room-coordinator-admission') !== 'returned') {
+            const unavailable = await acquireFreshAdmission()
+            if (unavailable) {
+              return unavailable
+            }
+          }
+        } catch {
+          // Transfer outcome is ambiguous after transport failure; never reuse that capability.
+          const unavailable = await acquireFreshAdmission()
+          if (unavailable) {
+            return unavailable
+          }
+        }
+      }
+      const coordinatorFallback =
+        !isLegacyLiveStreamRequest(request) &&
+        selection === 'coordinator' &&
+        dependencies.openRoomReadOnly
+      const connection = coordinatorFallback
+        ? dependencies.openRoomReadOnly!(authentication, roomId)
+        : dependencies.openRoom(authentication, roomId)
       return createLiveSnapshotResponse({
         request: { signal: request.signal },
         scope: 'room',
         loadSnapshot: connection.loadSnapshot,
         classifyError: classifyGameError,
+        terminalAfterSnapshot: coordinatorFallback
+          ? () => {
+              return 'refresh'
+            }
+          : undefined,
         renewAdmission: admission?.renew,
         legacyMaxLifetime: isLegacyLiveStreamRequest(request),
         waitUntil: dependencies.waitUntil ?? waitUntil,
@@ -385,6 +500,14 @@ export const liveEventHandlers = createLiveEventHandlers<AuthenticatedContext>(
     userId(context) {
       return context.userId
     },
+    async authorizeRoom(context, roomId) {
+      const [seat] = await context.database
+        .select({ seat: roomSeat.seat })
+        .from(roomSeat)
+        .where(and(eq(roomSeat.roomId, roomId), eq(roomSeat.userId, context.userId)))
+        .limit(1)
+      return Boolean(seat)
+    },
     async acquireAdmission(context, scope, pageId) {
       const gate = env.LIVE_STREAM_ADMISSION.getByName(context.userId)
       return acquireLiveAdmission(
@@ -393,6 +516,7 @@ export const liveEventHandlers = createLiveEventHandlers<AuthenticatedContext>(
         },
         scope,
         pageId,
+        context.userId,
       )
     },
     openLobby(context) {
@@ -408,6 +532,14 @@ export const liveEventHandlers = createLiveEventHandlers<AuthenticatedContext>(
       return createManagedLiveConnection(runtime, () => {
         return Effect.flatMap(GameService, (games) => {
           return games.tick(context.userId, roomId)
+        })
+      })
+    },
+    openRoomReadOnly(context, roomId) {
+      const runtime = createGameRuntime(context.database)
+      return createManagedLiveConnection(runtime, () => {
+        return Effect.flatMap(GameService, (games) => {
+          return games.getRoom(context.userId, roomId)
         })
       })
     },

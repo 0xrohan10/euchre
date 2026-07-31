@@ -94,6 +94,85 @@ describe('LiveStreamAdmissionState', () => {
 })
 
 describe('live stream admission Durable Object API', () => {
+  it('transfers only the exact authenticated user, scope, page, and lease capability', async () => {
+    const storage = new MemoryAdmissionStorage()
+    await handleLiveStreamAdmissionRequest(
+      storage,
+      admissionRequest('acquire', {
+        userId: 'user-a',
+        scope: 'room',
+        pageId: ids[0],
+        leaseId: ids[1],
+      }),
+      1,
+    )
+
+    for (const forged of [
+      { userId: 'user-b', scope: 'room', pageId: ids[0], leaseId: ids[1] },
+      { userId: 'user-a', scope: 'lobby', pageId: ids[0], leaseId: ids[1] },
+      { userId: 'user-a', scope: 'room', pageId: ids[2], leaseId: ids[1] },
+      { userId: 'user-a', scope: 'room', pageId: ids[0], leaseId: ids[3] },
+    ]) {
+      const response = await handleLiveStreamAdmissionRequest(
+        storage,
+        new Request('https://admission.test/transfer', {
+          method: 'POST',
+          body: JSON.stringify(forged),
+        }),
+        2,
+      )
+      expect(response.status).toBe(409)
+    }
+
+    const transferred = await handleLiveStreamAdmissionRequest(
+      storage,
+      new Request('https://admission.test/transfer', {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: 'user-a',
+          scope: 'room',
+          pageId: ids[0],
+          leaseId: ids[1],
+        }),
+      }),
+      3,
+    )
+    expect(transferred.status).toBe(204)
+
+    const forgedRenewal = await handleLiveStreamAdmissionRequest(
+      storage,
+      admissionRequest('renew', {
+        userId: 'user-a',
+        scope: 'room',
+        pageId: ids[2],
+        leaseId: ids[1],
+      }),
+      4,
+    )
+    expect(forgedRenewal.status).toBe(404)
+
+    const returned = await handleLiveStreamAdmissionRequest(
+      storage,
+      new Request('https://admission.test/return', {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: 'user-a',
+          scope: 'room',
+          pageId: ids[0],
+          leaseId: ids[1],
+        }),
+      }),
+      5,
+    )
+    expect(returned.status).toBe(204)
+    const edgeRenewal = await handleLiveStreamAdmissionRequest(
+      storage,
+      admissionRequest('renew', { leaseId: ids[1] }),
+      6,
+    )
+    expect(edgeRenewal.status).toBe(200)
+    await expect(edgeRenewal.json()).resolves.toEqual({ status: 'active' })
+  })
   it('coordinates floods through shared storage across isolate callers', async () => {
     const storage = new MemoryAdmissionStorage()
     const responses = []
@@ -102,6 +181,7 @@ describe('live stream admission Durable Object API', () => {
         await handleLiveStreamAdmissionRequest(
           storage,
           admissionRequest('acquire', {
+            userId: 'test-user',
             scope: 'room',
             pageId: ids[index],
             leaseId: ids[index + 4],
@@ -127,6 +207,7 @@ describe('live stream admission Durable Object API', () => {
       await handleLiveStreamAdmissionRequest(
         storage,
         admissionRequest('acquire', {
+          userId: 'test-user',
           scope: 'room',
           pageId: ids[index],
           leaseId: ids[index + 3],
@@ -137,7 +218,12 @@ describe('live stream admission Durable Object API', () => {
 
     const reconnect = await handleLiveStreamAdmissionRequest(
       storage,
-      admissionRequest('acquire', { scope: 'room', pageId: ids[0], leaseId: ids[7] }),
+      admissionRequest('acquire', {
+        userId: 'test-user',
+        scope: 'room',
+        pageId: ids[0],
+        leaseId: ids[7],
+      }),
       4,
     )
     expect(reconnect.status).toBe(429)
@@ -159,6 +245,7 @@ describe('live stream admission Durable Object API', () => {
         await handleLiveStreamAdmissionRequest(
           storage,
           admissionRequest('acquire', {
+            userId: 'test-user',
             scope: 'room',
             pageId: ids[0],
             leaseId: ids[index + 3],
@@ -186,7 +273,12 @@ describe('live stream admission Durable Object API', () => {
       const response = serialized.then(() => {
         return handleLiveStreamAdmissionRequest(
           storage,
-          admissionRequest('acquire', { scope: 'room', pageId: ids[0], leaseId }),
+          admissionRequest('acquire', {
+            userId: 'test-user',
+            scope: 'room',
+            pageId: ids[0],
+            leaseId,
+          }),
           now,
         )
       })
@@ -232,7 +324,12 @@ describe('live stream admission Durable Object API', () => {
     const storage = new MemoryAdmissionStorage()
     await handleLiveStreamAdmissionRequest(
       storage,
-      admissionRequest('acquire', { scope: 'lobby', pageId: ids[0], leaseId: ids[1] }),
+      admissionRequest('acquire', {
+        userId: 'test-user',
+        scope: 'lobby',
+        pageId: ids[0],
+        leaseId: ids[1],
+      }),
       10,
     )
     await handleLiveStreamAdmissionRequest(
@@ -250,7 +347,12 @@ describe('live stream admission Durable Object API', () => {
 
     await handleLiveStreamAdmissionRequest(
       storage,
-      admissionRequest('acquire', { scope: 'lobby', pageId: ids[0], leaseId: ids[2] }),
+      admissionRequest('acquire', {
+        userId: 'test-user',
+        scope: 'lobby',
+        pageId: ids[0],
+        leaseId: ids[2],
+      }),
       20,
     )
     const expired = await handleLiveStreamAdmissionRequest(

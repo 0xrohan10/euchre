@@ -46,6 +46,7 @@ import {
   type RatingQueueMessage,
 } from './rating-reconciliation.server'
 import { activeRoomConflicts, activeRoomForUser, lockActiveRoomUsers } from './active-room.server'
+import { acquireRoomScheduler } from './room-scheduler-lease.server'
 
 export class GameServiceError extends Data.TaggedError('GameServiceError')<{
   readonly code: 'not-found' | 'forbidden' | 'conflict' | 'stale' | 'invalid' | 'database'
@@ -104,8 +105,19 @@ type GameServiceShape = {
     roomId: string,
     connected: boolean,
   ) => Effect.Effect<RoomView, GameServiceError>
-  tick: (userId: string, roomId: string) => Effect.Effect<RoomView, GameServiceError>
+  tick: (
+    userId: string,
+    roomId: string,
+    options?: TickOptions,
+  ) => Effect.Effect<RoomView, GameServiceError>
   history: (userId: string) => Effect.Effect<GameHistorySummary[], GameServiceError>
+}
+
+export type TickOptions = {
+  heartbeat?: boolean
+  scheduler?: 'legacy' | 'coordinator'
+  schedulerOwnerId?: string
+  schedulerEpoch?: number
 }
 
 export class GameService extends Context.Service<GameService, GameServiceShape>()(
@@ -471,7 +483,7 @@ const createGameService = (
         catch: failure,
       })
     }),
-    tick: Effect.fn('GameService.tick')((userId: string, roomId: string) => {
+    tick: Effect.fn('GameService.tick')((userId: string, roomId: string, options?: TickOptions) => {
       return Effect.tryPromise({
         try: async () => {
           const toPolicyInput = (
@@ -482,6 +494,7 @@ const createGameService = (
             return {
               nowMs,
               callerUserId: userId,
+              heartbeatEnabled: options?.heartbeat,
               room: {
                 status: record.status,
                 updatedAtMs: record.updatedAt.getTime(),
@@ -530,9 +543,24 @@ const createGameService = (
           if (preflight.kind === 'view') {
             return preflight.view
           }
-
           const ratingSignals: string[] = []
           const result = await db.transaction(async (tx) => {
+            const schedulerMode = options?.scheduler ?? 'legacy'
+            const scheduler = await acquireRoomScheduler(
+              tx,
+              roomId,
+              schedulerMode,
+              options?.schedulerOwnerId ?? '00000000-0000-4000-8000-000000000001',
+              undefined,
+              undefined,
+              options?.schedulerEpoch,
+            )
+            if (!scheduler) {
+              if (schedulerMode === 'coordinator') {
+                throw new DomainError('stale', 'Room coordinator ownership was lost.')
+              }
+              return viewRoom(userId, roomId, tx)
+            }
             if (preflight.status === 'finished') {
               await lockUsersAndRejectActiveRoomConflicts(tx, preflight.userIds, roomId)
             }
@@ -590,7 +618,7 @@ const createGameService = (
             }
             const staleSeats = renewedSeats.filter((seat) => {
               return (
-                seat.userId !== userId &&
+                (options?.heartbeat === false || seat.userId !== userId) &&
                 seat.connected &&
                 seat.controller === 'human' &&
                 lockedNow.getTime() - seat.lastSeenAt.getTime() >= 15_000

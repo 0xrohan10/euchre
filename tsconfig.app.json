@@ -4,7 +4,12 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client", "node", "./worker-configuration.d.ts"],
+    "types": [
+      "vite/client",
+      "node",
+      "./worker-configuration.d.ts",
+      "@cloudflare/vitest-pool-workers/types"
+    ],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 

@@ -25,6 +25,7 @@ export type TickRoomSnapshot = {
 export type TickPolicyInput = {
   nowMs: number
   callerUserId: string
+  heartbeatEnabled?: boolean
   room: TickRoomSnapshot
   seats: TickSeatSnapshot[]
 }
@@ -47,13 +48,18 @@ function callerSeat(input: TickPolicyInput): TickSeatSnapshot | undefined {
 
 export function evaluateTickPolicy(input: TickPolicyInput): TickPolicy {
   const caller = callerSeat(input)
-  const reconnectWorkDue = Boolean(caller && (!caller.connected || caller.controller !== 'human'))
+  const heartbeatEnabled = input.heartbeatEnabled !== false
+  const reconnectWorkDue = Boolean(
+    heartbeatEnabled && caller && (!caller.connected || caller.controller !== 'human'),
+  )
   const heartbeatWriteDue = Boolean(
-    caller && (reconnectWorkDue || input.nowMs - caller.lastSeenAtMs >= HEARTBEAT_WRITE_MS),
+    heartbeatEnabled &&
+    caller &&
+    (reconnectWorkDue || input.nowMs - caller.lastSeenAtMs >= HEARTBEAT_WRITE_MS),
   )
   const stalePresenceWorkDue = input.seats.some((seat) => {
     return (
-      seat.userId !== input.callerUserId &&
+      (!heartbeatEnabled || seat.userId !== input.callerUserId) &&
       seat.connected &&
       seat.controller === 'human' &&
       input.nowMs - seat.lastSeenAtMs >= STALE_PRESENCE_MS
