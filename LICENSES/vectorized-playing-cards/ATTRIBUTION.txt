@@ -1,0 +1,15 @@
+Upstream-Name: Vectorized Playing Cards
+Upstream-Version: 1.3
+Upstream-Source: http://code.google.com/p/vectorized-playing-cards/
+Upstream-Copyright: Copyright 2011 - Chris Aguilar
+Upstream-License: LGPL-3.0-only
+Distribution-Package: cardsJS
+Distribution-Version: 1.1.1
+Distribution-Source: https://registry.npmjs.org/cardsJS/-/cardsJS-1.1.1.tgz
+Distribution-Integrity-SHA-512: S8J1GsZp9Wimj1jBu6jhH8pHNuOvkA7uryP7YeeaMP8o02g86rdTkXes0rAb/y8ShdCx5JDwg116/hMEGtAuJw==
+Derivative-Date: 2026-07-28
+Derivative-Tool: SVGO 4.0.0
+Modifications: Selected the 27 cards used by Euchre and deterministically optimized their SVG markup; rendered artwork pixels are unchanged.
+Corresponding-Source: The complete upstream source is available from Distribution-Source above.
+Reproduction: Run `bun run assets:cards`.
+Verification: Run `bun run assets:verify` to compare rendered pixels with the source.

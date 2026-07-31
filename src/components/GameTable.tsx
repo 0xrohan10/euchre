@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { playableCardImageUrls } from '../card-assets'
+import { warmCardImages, type CardImageSessionCache } from '../card-image-loader'
 import { authClient } from '../lib/auth-client'
 import { hasNaturalTrump, legalCards, sortHand, SUITS, type Card } from '../game/card'
 import { teamName, teamOf, type Player } from '../game/player'
@@ -33,6 +35,11 @@ import { SEAT_ORDER, seatsByNumber } from './seats'
 import { SUIT_SYMBOL } from './suit-symbol'
 import { TrickPile } from './TrickPile'
 import { WonTricksDialog } from './WonTricksDialog'
+
+const cardImageSessionCache: CardImageSessionCache = {
+  completedUrls: new Set<string>(),
+  inFlightUrls: new Set<string>(),
+}
 
 function collectedTrickCount(game: GameView, player: Player) {
   const faceUpWinner = game.phase === 'trick-complete' ? game.lastTrickWinner : null
@@ -116,6 +123,15 @@ export function GameTable({
     player: Player
     retainedIds: string[]
   } | null>(null)
+
+  useEffect(() => {
+    const warmup = warmCardImages({
+      priorityUrls: [],
+      deferredUrls: playableCardImageUrls,
+      sessionCache: cardImageSessionCache,
+    })
+    return warmup.stop
+  }, [])
 
   useLayoutEffect(() => {
     const previous = previousGame.current
@@ -498,6 +514,7 @@ export function GameTable({
                               <CardFace
                                 key={card.id}
                                 card={card}
+                                priority
                                 playable={playable}
                                 dimmed={isTurn && !playable}
                                 motionClass={arrivingFromKitty ? 'farmer-card-received' : ''}
@@ -550,7 +567,7 @@ export function GameTable({
                 {game.trick.length === 0 &&
                   (game.phase === 'exchanging' || game.phase === 'ordering') && (
                     <div className="up-card">
-                      <CardFace card={game.upCard} />
+                      <CardFace card={game.upCard} priority />
                     </div>
                   )}
               </div>

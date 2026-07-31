@@ -31,6 +31,11 @@ jobs:
         with:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile
+      - run: bun run assets:verify
+      - run: bun run assets:cards
+      - run: >-
+          git diff --exit-code -- src/assets/cards &&
+          test -z "$(git status --porcelain --untracked-files=all -- src/assets/cards)"
       - run: bun run db:migrate
       - run: bun run test
       - run: bun run typecheck

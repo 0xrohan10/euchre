@@ -7,6 +7,8 @@ set -euo pipefail
 
 PRODUCTION_BRANCH="${CF_PRODUCTION_BRANCH:-main}"
 
+bun run assets:verify
+
 if [[ "${WORKERS_CI:-}" != "1" || "${WORKERS_CI_BRANCH:-}" == "${PRODUCTION_BRANCH}" ]]; then
   if [[ -z "${DATABASE_URL:-}" ]]; then
     echo "DATABASE_URL is required for migrations" >&2
