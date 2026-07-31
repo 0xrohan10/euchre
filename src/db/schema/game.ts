@@ -73,6 +73,36 @@ export const partyMember = pgTable(
   },
 )
 
+export const partyJoin = pgTable(
+  'party_join',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(
+        () => {
+          return user.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    inviteCode: uuid('invite_code').notNull(),
+    partyId: uuid('party_id')
+      .notNull()
+      .references(
+        () => {
+          return party.id
+        },
+        { onDelete: 'cascade' },
+      ),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => {
+    return [
+      primaryKey({ columns: [table.userId, table.inviteCode] }),
+      index('party_join_party_id_idx').on(table.partyId),
+    ]
+  },
+)
+
 export const room = pgTable(
   'room',
   {

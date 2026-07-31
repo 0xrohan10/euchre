@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link, useNavigate, useRouter } from '@tanstack/react-router'
 import { authClient } from '../lib/auth-client'
 import type { GameRules } from '../game/rules'
 import type { PartyView, RoomView } from '../multiplayer'
@@ -38,6 +39,8 @@ export function Lobby({
   userId: string
   userName: string
 }) {
+  const navigate = useNavigate()
+  const router = useRouter()
   const [mode, setMode] = useState<'multiplayer' | null>(null)
   const [setupMode, setSetupMode] = useState<'single-player' | 'multiplayer' | 'partner' | null>(
     null,
@@ -112,15 +115,16 @@ export function Lobby({
         <Brand />
         <HeaderMenu>
           <span className="eyebrow header-user">{userName}</span>
-          <a className="quiet-button" href="/history">
+          <Link className="quiet-button" to="/history">
             Game history
-          </a>
+          </Link>
           <HowToPlay />
           <button
             className="quiet-button"
             onClick={() => {
-              return void authClient.signOut().then(() => {
-                return window.location.reload()
+              return void authClient.signOut().then(async () => {
+                await navigate({ to: '/sign-in', replace: true })
+                await router.invalidate()
               })
             }}
           >

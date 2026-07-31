@@ -1,9 +1,13 @@
 import { useState, type FormEvent } from 'react'
+import { useNavigate, useRouter } from '@tanstack/react-router'
+import { safeReturnTo } from '../authenticated-routes'
 import { authClient } from '../lib/auth-client'
 import { Brand } from './Brand'
 import { HowToPlay } from './HowToPlay'
 
-export function AuthScreen() {
+export function AuthScreen({ returnTo }: { returnTo?: string }) {
+  const navigate = useNavigate()
+  const router = useRouter()
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
@@ -23,7 +27,37 @@ export function AuthScreen() {
     if (result.error) {
       setError(result.error.message ?? 'Authentication failed.')
     } else {
-      window.location.reload()
+      await router.invalidate()
+      const destination = new URL(
+        safeReturnTo(returnTo, window.location.origin),
+        window.location.origin,
+      )
+      const gameInvite = destination.pathname.match(/^\/games\/([^/]+)$/)
+      const partnerInvite = destination.pathname.match(/^\/partners\/([^/]+)$/)
+      const search = Object.fromEntries(destination.searchParams)
+      const hash = destination.hash.slice(1)
+      if (gameInvite) {
+        await navigate({
+          to: '/games/$code',
+          params: { code: gameInvite[1] },
+          search,
+          hash,
+          replace: true,
+        })
+      } else if (partnerInvite) {
+        await navigate({
+          to: '/partners/$code',
+          params: { code: partnerInvite[1] },
+          search,
+          hash,
+          replace: true,
+        })
+      } else if (destination.pathname === '/history') {
+        await navigate({ to: '/history', search, hash, replace: true })
+      } else {
+        const room = destination.searchParams.get('room') ?? undefined
+        await navigate({ to: '/', search: room ? { room } : {}, hash, replace: true })
+      }
     }
   }
 

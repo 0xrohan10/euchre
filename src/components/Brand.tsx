@@ -1,6 +1,8 @@
+import { Link } from '@tanstack/react-router'
+
 export function Brand() {
   return (
-    <a className="brand" href="/" aria-label="Homepage">
+    <Link className="brand" to="/" aria-label="Homepage">
       <svg className="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
         <rect
           className="brand-mark-back"
@@ -15,6 +17,6 @@ export function Brand() {
         <path className="brand-mark-pip" d="M16.7 8.7 19.5 11.5 16.7 14.3 13.9 11.5Z" />
       </svg>
       <span>Euchs</span>
-    </a>
+    </Link>
   )
 }

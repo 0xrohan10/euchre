@@ -1,8 +1,5 @@
-import { useEffect, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import type { GameHistorySummary } from '../game/history'
-import { authClient } from '../lib/auth-client'
-import { getGameHistoryFn } from '../server/game.functions'
-import { AuthScreen } from './AuthScreen'
 import { Brand } from './Brand'
 
 function teamName(history: GameHistorySummary, team: 0 | 1) {
@@ -27,40 +24,14 @@ function ruleSummary(history: GameHistorySummary) {
     .join(' / ')
 }
 
-export function GameHistory() {
-  const { data: session, isPending: sessionPending } = authClient.useSession()
-  const [history, setHistory] = useState<GameHistorySummary[] | null>(null)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (!session) {
-      return
-    }
-    void getGameHistoryFn()
-      .then(setHistory)
-      .catch(() => {
-        setError('Could not load your game history.')
-      })
-  }, [session])
-
-  if (sessionPending) {
-    return (
-      <main className="auth-shell">
-        <span className="eyebrow">Loading history...</span>
-      </main>
-    )
-  }
-  if (!session) {
-    return <AuthScreen />
-  }
-
+export function GameHistory({ history }: { history: GameHistorySummary[] }) {
   return (
     <main className="history-shell">
       <header className="app-header">
         <Brand />
-        <a className="quiet-button" href="/">
+        <Link className="quiet-button" to="/">
           Back to table
-        </a>
+        </Link>
       </header>
       <section className="history-page">
         <div className="history-heading">
@@ -68,13 +39,7 @@ export function GameHistory() {
           <h1>Game history</h1>
           <p>Your 50 most recent completed matches.</p>
         </div>
-        {error ? (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        ) : history === null ? (
-          <p className="history-empty">Loading completed matches...</p>
-        ) : history.length === 0 ? (
+        {history.length === 0 ? (
           <div className="history-empty">
             <strong>No completed games yet.</strong>
             <span>Finish a match and it will appear here.</span>
