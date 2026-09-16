@@ -9,7 +9,15 @@ import {
   type LiveConnectionState,
   withRequestDeadline,
 } from '../interaction-feedback'
-import { hasNaturalTrump, legalCards, sortHand, SUITS, type Card } from '../game/card'
+import {
+  effectiveSuit,
+  hasNaturalTrump,
+  legalCards,
+  sameColorSuit,
+  sortHand,
+  SUITS,
+  type Card,
+} from '../game/card'
 import { teamName, teamOf, type Player } from '../game/player'
 import type { GameAction } from '../game/state'
 import {
@@ -22,6 +30,7 @@ import {
   type GameView,
   type PendingRoomView,
   type RoomView,
+  type SeatView,
 } from '../multiplayer'
 import {
   confirmRematchFn,
@@ -42,6 +51,7 @@ import { HeaderMenu } from './HeaderMenu'
 import { HiddenHand } from './HiddenHand'
 import { HowToPlay } from './HowToPlay'
 import { PlayerBadge } from './PlayerBadge'
+import { PlayableHand } from './PlayableHand'
 import { SEAT_ORDER, seatsByNumber } from './seats'
 import { SUIT_SYMBOL } from './suit-symbol'
 import { TrickPile } from './TrickPile'
@@ -93,6 +103,23 @@ function resultCopy(game: GameView) {
     : { title: handTitle, description: handDescription }
 }
 
+function seatName(seats: ReadonlyMap<number, SeatView>, player: Player) {
+  return seats.get(player)?.name ?? `Player ${player + 1}`
+}
+
+function relationship(relative: Player, lonePlayer: Player | null, player: Player) {
+  if (lonePlayer !== null && player === (lonePlayer + 2) % 4) {
+    return 'Sitting out'
+  }
+  if (relative === 0) {
+    return 'You'
+  }
+  if (relative === 2) {
+    return 'Your partner'
+  }
+  return 'Opponent'
+}
+
 export function GameTable({
   room: confirmedRoom,
   connection,
@@ -128,7 +155,6 @@ export function GameTable({
   const result = resultCopy(game)
   const actionsDisabled = operation !== null || !connection.snapshotTrusted
   const viewerTurn = room.status === 'playing' && game.activePlayer === viewer
-  const isTurn = !actionsDisabled && viewerTurn
   const hand = sortHand(game.hand, game.trump)
   const legal =
     game.phase === 'playing' && game.trump
@@ -138,6 +164,22 @@ export function GameTable({
           }),
         )
       : new Set<string>()
+  const leadSuit =
+    game.trump && game.trick.length > 0 ? effectiveSuit(game.trick[0].card, game.trump) : null
+  const hasLeadSuit =
+    leadSuit !== null && game.trump !== null
+      ? hand.some((card) => {
+          return effectiveSuit(card, game.trump!) === leadSuit
+        })
+      : false
+  const completedTricks = game.tricks[0] + game.tricks[1]
+  const trickNumber = Math.min(
+    5,
+    game.phase === 'trick-complete' || game.phase === 'hand-over' || game.phase === 'match-over'
+      ? completedTricks
+      : completedTricks + 1,
+  )
+  const teammate = playerAt(viewer, 2)
   const previousGame = useRef(game)
   const roomRef = useRef(room)
   roomRef.current = room
@@ -458,6 +500,38 @@ export function GameTable({
       )}
     </div>
   )
+  const decisionAction =
+    viewerTurn && game.phase === 'discarding'
+      ? 'discard'
+      : viewerTurn && game.phase === 'playing'
+        ? 'play'
+        : null
+  const decisionTitle =
+    decisionAction === 'discard'
+      ? 'Choose a card to discard'
+      : decisionAction === 'play'
+        ? 'Your turn to play'
+        : viewerTurn && game.phase === 'exchanging'
+          ? 'Choose your exchange'
+          : viewerTurn && game.phase === 'ordering'
+            ? 'Order up or pass'
+            : viewerTurn && game.phase === 'calling'
+              ? 'Call trump or pass'
+              : game.phase === 'trick-complete'
+                ? 'Trick complete'
+                : `Waiting for ${seatName(seats, game.activePlayer)}`
+  const decisionDescription =
+    decisionAction === 'play'
+      ? leadSuit
+        ? hasLeadSuit
+          ? `Follow ${leadSuit}. Select a legal card, then confirm the play.`
+          : `You cannot follow ${leadSuit}. Select any card, then confirm the play.`
+        : 'Lead any card. Select one, then confirm the play.'
+      : decisionAction === 'discard'
+        ? 'All five cards are available. Select one, then confirm the discard.'
+        : viewerTurn
+          ? 'The current decision is ready below.'
+          : `${seatName(seats, game.activePlayer)} is making the current decision.`
   return (
     <div className="game-shell">
       <header className="app-header">
@@ -511,8 +585,29 @@ export function GameTable({
               </span>
             </div>
           </div>
-          <FiveScore score={game.score[0]} team={0} isViewer={viewerTeam === 0} />
-          <FiveScore score={game.score[1]} team={1} isViewer={viewerTeam === 1} />
+          {([viewerTeam, opponentTeam] as const).map((team) => {
+            const side = team === viewerTeam ? 'Us' : 'Them'
+            return (
+              <div className="score-team-wrap" key={team}>
+                <FiveScore
+                  score={game.score[team]}
+                  team={team}
+                  isViewer={team === viewerTeam}
+                  label={side}
+                />
+                <p className="score-members">
+                  {room.seats
+                    .filter((seat) => {
+                      return teamOf(seat.seat) === team
+                    })
+                    .map((seat) => {
+                      return seat.seat === viewer ? 'You' : seat.name
+                    })
+                    .join(' + ')}
+                </p>
+              </div>
+            )
+          })}
           <div className="hand-status">
             <span>Tricks</span>
             <strong>
@@ -529,6 +624,54 @@ export function GameTable({
               {error}
             </p>
           )}
+          <section className="current-decision" aria-live="polite">
+            <div>
+              <span className="eyebrow">Current decision</span>
+              {game.trump && (
+                <span
+                  className={`decision-trump ${game.trump === 'hearts' || game.trump === 'diamonds' ? 'red-suit' : ''}`}
+                >
+                  {SUIT_SYMBOL[game.trump]} {game.trump} trump
+                </span>
+              )}
+              <h2>{decisionTitle}</h2>
+              <p>{decisionDescription}</p>
+            </div>
+            {bidControls}
+            <PlayableHand
+              cards={hand}
+              action={decisionAction}
+              legalCardIds={
+                decisionAction === 'play'
+                  ? legal
+                  : hand.map((card) => {
+                      return card.id
+                    })
+              }
+              disabled={!viewerTurn || actionsDisabled}
+              untrusted={!connection.snapshotTrusted}
+              pending={operation?.type === 'command'}
+              trump={game.trump}
+              leadSuit={leadSuit}
+              receivedCardIds={
+                farmerExchange?.player === 0
+                  ? hand
+                      .filter((card) => {
+                        return !farmerExchange.retainedIds.includes(card.id)
+                      })
+                      .map((card) => {
+                        return card.id
+                      })
+                  : []
+              }
+              onConfirm={(card) => {
+                if (decisionAction === null) {
+                  return
+                }
+                return act({ type: decisionAction, cardId: card.id })
+              }}
+            />
+          </section>
           <section className="felt-table" aria-busy={operation?.type === 'command'}>
             {farmerExchange && (
               <FarmerExchange cards={farmerExchange.cards} player={farmerExchange.player} />
@@ -547,6 +690,9 @@ export function GameTable({
                     maker={game.maker === player}
                     lone={game.lonePlayer === player}
                   />
+                  <span className="seat-relationship">
+                    {relationship(relative, game.lonePlayer, player)}
+                  </span>
                   <TrickPile
                     trickCount={collectedTrickCount(game, player)}
                     tricks={game.wonTricks[player]}
@@ -560,34 +706,6 @@ export function GameTable({
                 <div className={`seat seat-${position}`} key={player}>
                   {relative === 0 ? (
                     <>
-                      {bidControls}
-                      <div className="hand-zone">
-                        <div className="human-hand">
-                          {hand.map((card) => {
-                            const playable =
-                              isTurn && (game.phase === 'discarding' || legal.has(card.id))
-                            const arrivingFromKitty =
-                              farmerExchange?.player === 0 &&
-                              !farmerExchange.retainedIds.includes(card.id)
-                            return (
-                              <CardFace
-                                key={card.id}
-                                card={card}
-                                priority
-                                playable={playable}
-                                dimmed={isTurn && !playable}
-                                motionClass={arrivingFromKitty ? 'farmer-card-received' : ''}
-                                onClick={() => {
-                                  return void act({
-                                    type: game.phase === 'discarding' ? 'discard' : 'play',
-                                    cardId: card.id,
-                                  })
-                                }}
-                              />
-                            )
-                          })}
-                        </div>
-                      </div>
                       <div className={`player-console ${teamClass}`}>{identity}</div>
                     </>
                   ) : relative === 1 || relative === 3 ? (
@@ -636,7 +754,7 @@ export function GameTable({
               (game.phase === 'hand-over' || game.phase === 'match-over') && (
                 <div className="table-result-scrim">
                   <BlockingDialog
-                    className="result-dialog"
+                    className="result-dialog game-dialog"
                     labelledBy="result-title"
                     describedBy="result-description"
                   >
@@ -734,6 +852,69 @@ export function GameTable({
               )}
           </section>
         </main>
+        <aside className="current-info" aria-label="Current hand information">
+          <section>
+            <span className="eyebrow">This hand</span>
+            <div className="current-info-grid">
+              <div>
+                <span>Hand</span>
+                <strong>{game.handNumber}</strong>
+              </div>
+              <div>
+                <span>Trick</span>
+                <strong>{trickNumber} of 5</strong>
+              </div>
+              <div>
+                <span>Cards played</span>
+                <strong>
+                  {game.trick.length} of {game.lonePlayer === null ? 4 : 3}
+                </strong>
+              </div>
+              <div>
+                <span>Partner</span>
+                <strong>{seatName(seats, teammate)}</strong>
+              </div>
+            </div>
+          </section>
+          <section className="trump-summary">
+            <span className="eyebrow">Trump</span>
+            <strong
+              className={game.trump === 'hearts' || game.trump === 'diamonds' ? 'red-suit' : ''}
+            >
+              {game.trump ? `${SUIT_SYMBOL[game.trump]} ${game.trump}` : 'Not called'}
+            </strong>
+            <p className="maker-note">
+              {game.maker === null
+                ? 'Calling decides who makes this hand.'
+                : `${seatName(seats, game.maker)} called ${game.trump}; ${teamOf(game.maker) === viewerTeam ? 'Us' : 'Them'} are makers · ${teamOf(game.maker) === viewerTeam ? 'Them' : 'Us'} are defenders.`}
+              {game.lonePlayer !== null
+                ? ` ${seatName(seats, game.lonePlayer)} is going alone.`
+                : ''}
+            </p>
+          </section>
+          <section className="trick-summary">
+            <span className="eyebrow">Tricks taken</span>
+            <div className="trick-summary-row">
+              <span>Us</span>
+              <strong>{game.tricks[viewerTeam]}</strong>
+            </div>
+            <div className="trick-summary-row">
+              <span>Them</span>
+              <strong>{game.tricks[opponentTeam]}</strong>
+            </div>
+            <p>Makers need 3 to make it. Defenders need 3 to euchre them.</p>
+          </section>
+          {game.trump && (
+            <details className="bower-details">
+              <summary>The bowers this hand</summary>
+              <p>
+                J{SUIT_SYMBOL[game.trump]} is the right bower. J
+                {SUIT_SYMBOL[sameColorSuit(game.trump)]} is the left bower and counts as{' '}
+                {game.trump}.
+              </p>
+            </details>
+          )}
+        </aside>
       </div>
       {viewingTricks !== null &&
         !room.disconnectVote &&
@@ -752,7 +933,7 @@ export function GameTable({
       {room.disconnectVote && (
         <div className="settings-scrim">
           <BlockingDialog
-            className="settings-panel"
+            className="settings-panel game-dialog"
             labelledBy="disconnect-vote-title"
             describedBy="disconnect-vote-description"
           >
@@ -798,7 +979,7 @@ export function GameTable({
       {confirmLeave && !room.disconnectVote && (
         <div className="settings-scrim">
           <BlockingDialog
-            className="settings-panel"
+            className="settings-panel game-dialog"
             labelledBy="leave-game-title"
             onEscape={() => {
               if (operation?.type !== 'leave') {

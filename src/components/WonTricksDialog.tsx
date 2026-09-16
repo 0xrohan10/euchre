@@ -16,7 +16,7 @@ export function WonTricksDialog({
   return (
     <div className="settings-scrim">
       <BlockingDialog
-        className="settings-panel won-tricks-panel"
+        className="settings-panel won-tricks-panel game-dialog"
         labelledBy="won-tricks-title"
         onEscape={onClose}
         onBackdropClick={onClose}

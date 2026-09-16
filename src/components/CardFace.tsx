@@ -7,6 +7,7 @@ export function CardFace({
   dimmed = false,
   priority = false,
   motionClass = '',
+  className = '',
   onClick,
 }: {
   card: Card
@@ -14,9 +15,10 @@ export function CardFace({
   dimmed?: boolean
   priority?: boolean
   motionClass?: string
+  className?: string
   onClick?: () => void
 }) {
-  const className = `playing-card dealt ${playable ? 'playable' : dimmed ? 'invalid' : ''} ${motionClass}`
+  const cardClassName = `playing-card dealt ${playable ? 'playable' : dimmed ? 'invalid' : ''} ${motionClass} ${className}`
   const content = (
     <img
       className="card-art"
@@ -26,10 +28,10 @@ export function CardFace({
     />
   )
   return onClick ? (
-    <button className={className} disabled={!playable} onClick={onClick}>
+    <button className={cardClassName} disabled={!playable} onClick={onClick}>
       {content}
     </button>
   ) : (
-    <div className={className}>{content}</div>
+    <div className={cardClassName}>{content}</div>
   )
 }
