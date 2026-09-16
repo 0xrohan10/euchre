@@ -1,63 +1,1286 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Euchre — A familiar table</title>
-<style>
-@font-face{font-family:InterVariable;font-style:normal;font-weight:100 900;font-display:swap;src:url('https://rsms.me/inter/font-files/InterVariable.woff2') format('woff2')}
-:root{--paper:#f8f6ef;--ink:#252b25;--muted:#62695e;--felt:#315e4b;--red:#b33132;--line:#252b2526;--card:#fffdf6;--action:#25533e}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px InterVariable,Arial,sans-serif;-webkit-font-smoothing:antialiased;font-feature-settings:'cv02','cv03','cv04','cv11','ss01','ss03';font-variant-numeric:tabular-nums}button{font:inherit}a{color:inherit}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #b15327;outline-offset:4px}button{cursor:pointer}h1,h2,h3,p{margin:0}h1,h2,h3{font-weight:600;text-wrap:balance}p{text-wrap:pretty}header{border-bottom:1px solid var(--line);padding:18px 36px;display:flex;justify-content:space-between;align-items:center;gap:20px}.wordmark{font-family:Georgia,serif;font-size:26px;letter-spacing:-1px;text-decoration:none}.study-label{font:11px monospace;letter-spacing:1px;color:var(--muted)}main{max-width:1440px;margin:auto;isolation:isolate}.intro{padding:30px 36px 26px;display:flex;align-items:baseline;justify-content:space-between;gap:24px}.intro h1{font-size:24px;letter-spacing:-.7px}.intro p{color:var(--muted);font-size:13px}.game{display:grid;grid-template-columns:225px minmax(0,1fr) 205px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 36px}.scoreboard{padding:26px 25px 26px 0;border-right:1px solid var(--line)}.section-label{font-size:12px;font-weight:600;margin-bottom:7px}.subtle{color:var(--muted);font-size:12px;line-height:1.5}.score-teams{display:flex;flex-direction:column;gap:24px;margin-top:23px}.team-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.team-heading h3{font-size:15px}.score-digit{font-size:23px;font-weight:500}.score-stack{position:relative;width:98px;height:164px;margin:9px auto 8px}.five{position:absolute;width:94px;height:124px;border:1px solid #252b2530;border-radius:5px;background:var(--card);box-shadow:0 2px 4px #252b2510;color:var(--ink);font-family:Georgia,serif}.five.red{color:var(--red)}.five.cover{top:39px;transform:rotate(3deg);transform-origin:center}.five.back{background-color:#fbf8ed;background-image:repeating-linear-gradient(45deg,transparent,transparent 3px,#486a5a 3px,#486a5a 4px);border:5px solid var(--card);outline:1px solid #252b2530}.five.back:after{content:'♣';position:absolute;inset:31px 19px;display:grid;place-items:center;border-radius:50%;background:#fbf8ed;border:1px solid #486a5a;color:#486a5a;font-size:21px}.five-index{position:absolute;top:4px;left:5px;font-size:12px;line-height:1}.five-index.bottom{top:auto;left:auto;right:5px;bottom:4px;transform:rotate(180deg)}.pip{position:absolute;font-size:24px;line-height:1}.pip.tl{left:20px;top:14px}.pip.tr{right:17px;top:14px}.pip.center{top:49px;left:37px}.pip.bl{left:20px;bottom:14px;transform:rotate(180deg)}.pip.br{right:17px;bottom:14px;transform:rotate(180deg)}.score-caption{font-size:11px;color:var(--muted);text-align:center}.score-help{margin-top:22px;font-size:12px;line-height:1.6}.score-help summary{cursor:pointer;text-decoration:underline;text-underline-offset:3px}.score-help p{margin-top:8px;color:var(--muted)}.play-area{padding:21px 20px 25px;min-width:0}.hand-meta{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted)}.trump{color:var(--ink);font-weight:500}.red-suit{color:var(--red)}.table-stage{position:relative;width:100%;max-width:560px;aspect-ratio:1;margin:8px auto 0}.felt{position:absolute;width:74%;aspect-ratio:1;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;background:var(--felt);border:8px solid #8e7758;outline:1px solid #65553e;box-shadow:inset 0 0 0 1px #ffffff28}.felt:before{content:'';position:absolute;inset:12px;border:1px solid #ffffff25;border-radius:50%}.seat{position:absolute;z-index:2;text-align:center;font-size:13px;white-space:nowrap}.seat .name{font-weight:600}.seat .role{font-size:10px;color:var(--muted);margin-top:4px}.north{top:1%;left:50%;transform:translateX(-50%)}.south{bottom:1%;left:50%;transform:translateX(-50%)}.west{left:0;top:50%;transform:translateY(-50%)}.east{right:0;top:50%;transform:translateY(-50%)}.dealer-chip{width:23px;height:23px;display:inline-grid;place-items:center;border:1px solid #a88e5e;background:#f0e0b9;border-radius:50%;font:11px Georgia,serif;margin-left:4px;vertical-align:middle}.seat.south{border-bottom:2px solid var(--action);padding-bottom:6px}.backs{display:flex;justify-content:center;margin-top:8px;gap:3px}.backs i{display:block;width:14px;height:21px;background:repeating-linear-gradient(45deg,#486a5a,#486a5a 2px,#f8f6ef 2px,#f8f6ef 3px);border:2px solid var(--paper);outline:1px solid var(--line);border-radius:2px}.west .backs,.east .backs{margin-bottom:7px}.table-note{position:absolute;top:18%;left:0;right:0;text-align:center;color:#e1ece3;font-size:11px}.played{position:absolute;width:174px;height:156px;left:50%;top:52%;transform:translate(-50%,-50%)}.playing-card{background:var(--card);border:1px solid #252b2526;border-radius:7px;width:75px;height:107px;position:relative;box-shadow:0 3px 5px #17251b16;color:var(--ink);font-family:Georgia,serif;display:block}.playing-card.red{color:var(--red)}.corner{position:absolute;top:7px;left:7px;font-size:21px;line-height:1;display:flex;flex-direction:column;align-items:center;gap:1px}.corner small{font-size:15px}.corner.bottom{top:auto;left:auto;bottom:7px;right:7px;transform:rotate(180deg)}.center-suit{position:absolute;inset:0;display:grid;place-items:center;font-size:34px}.played .playing-card{position:absolute}.played .lead{left:0;top:42px;transform:rotate(-7deg)}.played .second{right:10px;top:0;transform:rotate(4deg)}.lead-label{position:absolute;bottom:-14px;left:1px;color:#e1ece3;font-family:InterVariable,Arial,sans-serif;font-size:10px;white-space:nowrap}.trick-progress{position:absolute;bottom:14%;left:0;right:0;text-align:center;color:#e1ece3;font-size:11px}.your-hand{text-align:center;margin-top:2px}.your-hand h2{font-size:19px;letter-spacing:-.3px}.your-hand p{font-size:12px;color:var(--muted);margin-top:6px}.hand-cards{display:flex;justify-content:center;align-items:flex-start;gap:10px;margin-top:22px;min-height:143px}.hand-card{background:transparent;border:0;padding:0;position:relative;text-align:initial;transition:transform 140ms ease-out}.hand-card .playing-card{width:83px;height:116px}.hand-card[aria-pressed=true]{transform:translateY(-10px)}.hand-card[aria-pressed=true] .playing-card{outline:3px solid var(--action);outline-offset:3px}.hand-card:disabled{cursor:not-allowed}.hand-card:disabled .playing-card{background:#eae8de;box-shadow:none}.card-label{text-align:center;margin-top:10px;font-size:10px;color:var(--muted);font-family:InterVariable,Arial,sans-serif}.play-button{margin-top:12px;background:var(--action);color:white;border:1px solid var(--action);border-radius:5px;min-height:38px;padding:8px 18px;font-weight:500;min-width:190px}.play-button:hover{background:#193e2c}.play-button:disabled{background:#dce3da;border-color:#dce3da;color:#485b4a;cursor:default}.game-info{border-left:1px solid var(--line);padding:26px 0 26px 25px}.trump-heading{font-family:Georgia,serif;font-size:25px;margin:12px 0 8px}.call-note{font-size:13px;line-height:1.65;color:var(--muted)}.makers{font-size:12px;margin-top:15px;padding:9px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.tricks{margin-top:34px}.trick-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:19px;font-size:12px}.won-tricks{display:flex;gap:10px;align-items:center}.packet{position:relative;width:28px;height:39px;background:#fbf8ed;border:2px solid #fbf8ed;border-radius:2px;outline:1px solid #252b2530;box-shadow:2px 2px 0 #e4ded0,3px 3px 0 #252b2540;background-image:repeating-linear-gradient(45deg,#486a5a,#486a5a 2px,#fbf8ed 2px,#fbf8ed 3px);transform:rotate(-5deg)}.tricks .subtle{margin-top:18px}.bowers{margin-top:36px;border-top:1px solid var(--line);padding-top:19px;font-size:12px;line-height:1.7}.bowers summary{cursor:pointer;font-weight:500}.bowers p{color:var(--muted);margin-top:8px}.design-note{max-width:1050px;padding:30px 36px 45px;line-height:1.7}.design-note h2{font-size:18px;letter-spacing:-.3px;margin-bottom:8px}.design-note p{color:var(--muted)}.design-note strong{color:var(--ink);font-weight:500}.design-note .prototype-note{font-size:12px;margin-top:12px}.hand-status{min-height:18px}.selected-card{display:none}.played .selected-card{display:block;top:96px;left:57px;transform:rotate(2deg)}.played.after-play{top:47%}.played.after-play .lead-label{display:none}.empty-hand-slot{width:83px;height:116px;display:grid;place-items:center;border:1px dashed var(--line);border-radius:7px;color:var(--muted);font-size:12px}.reset{display:block;margin:10px auto 0;background:none;border:0;min-height:32px;text-decoration:underline;text-underline-offset:3px;color:var(--muted)}
-@media(hover:hover){.hand-card:not(:disabled):hover{transform:translateY(-7px)}.hand-card[aria-pressed=true]:hover{transform:translateY(-10px)}}
-@media(max-width:1100px){.game{grid-template-columns:160px minmax(0,1fr) 165px;margin:0 24px}.scoreboard{padding-right:16px}.game-info{padding-left:16px}.play-area{padding-left:12px;padding-right:12px}.seat{font-size:12px}.table-stage{min-height:360px;aspect-ratio:1}.felt{width:76%;max-width:360px}.intro{padding-left:24px;padding-right:24px}.intro p{max-width:300px;line-height:1.6}.played{transform:translate(-50%,-50%) scale(.85)}.table-note{top:15%;font-size:10px}.trick-progress{bottom:12%;font-size:10px}.north{top:0}.south{bottom:0}.seat .role{font-size:9px}.west{left:-3px}.east{right:-3px}.seat .backs{gap:2px}.backs i{width:11px;height:17px}}
-@media(max-width:800px){header{padding:16px 20px}.study-label{font-size:9px}.intro{padding:23px 20px;display:block}.intro h1{font-size:22px}.intro p{max-width:none;margin-top:9px;font-size:16px}.game{margin:0 20px;grid-template-columns:1fr}.scoreboard{padding:20px 0 18px;border-right:0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr 2fr;gap:0 20px}.scoreboard>.section-label{font-size:16px}.scoreboard>.subtle{grid-column:1;align-self:start;font-size:13px}.score-teams{grid-column:2;grid-row:1/4;display:flex;flex-direction:row;justify-content:space-evenly;margin:0;gap:20px}.team-heading{gap:12px}.team-heading h3{font-size:14px}.score-stack{width:62px;height:106px;margin-top:7px;margin-bottom:2px}.score-stack .five{transform:scale(.64);transform-origin:top left}.score-stack .five.cover{top:25px;transform:scale(.64) rotate(3deg)}.score-caption{font-size:10px}.score-digit{font-size:21px}.score-help{font-size:13px;margin-top:10px;max-width:200px}.play-area{padding:20px 0 25px}.hand-meta{font-size:13px}.table-stage{max-width:540px;min-height:0;aspect-ratio:1}.felt{width:74%;max-width:none}.played{transform:translate(-50%,-50%)}.north{top:1%}.south{bottom:1%}.game-info{border-left:0;border-top:1px solid var(--line);padding:20px 0;display:grid;grid-template-columns:1fr 1fr;gap:22px}.tricks{margin:0}.bowers{grid-column:1/-1;margin:0;font-size:16px}.game-info .section-label{font-size:16px}.call-note{font-size:16px}.tricks .subtle{font-size:14px}.trick-row{font-size:14px}.your-hand h2{font-size:22px}.your-hand p{font-size:16px}.play-button{min-height:46px;font-size:16px}.design-note{padding:26px 20px 36px;font-size:16px}.design-note .prototype-note{font-size:14px}.seat{font-size:13px}.seat .role{font-size:10px}.seat .backs{gap:3px}.backs i{width:14px;height:21px}.table-note{top:18%}.trick-progress{bottom:14%}}
-@media(max-width:440px){.game{margin:0 14px}.scoreboard{grid-template-columns:1fr 1.7fr;gap:0 10px}.score-teams{gap:12px}.team-heading{gap:5px}.team-heading h3{font-size:13px}.score-help{font-size:12px}.score-stack{margin-left:5px;margin-right:5px}.score-caption{font-size:9px}.felt{width:72%;border-width:6px}.felt:before{inset:8px}.seat{font-size:12px}.seat .role{font-size:9px}.backs i{width:10px;height:15px;border-width:1px}.backs{margin-top:5px}.west{left:0}.east{right:0}.dealer-chip{width:19px;height:19px;font-size:9px;margin-left:1px}.played{transform:translate(-50%,-50%) scale(.7);top:52%}.table-note{top:14%;font-size:9px}.trick-progress{bottom:11%;font-size:9px}.north{top:0}.south{bottom:0;padding-bottom:3px!important}.your-hand{margin-top:18px}.hand-cards{gap:12px}.hand-card .playing-card{width:79px;height:111px}.game-info{gap:17px}.won-tricks{gap:6px}.trump-heading{font-size:23px}.call-note{font-size:14px}.tricks .subtle{font-size:13px}.trick-row{font-size:13px}.packet{width:23px;height:32px}.hand-meta{font-size:12px}.study-label{font-size:8px;max-width:130px;text-align:right}.design-note{padding-left:14px;padding-right:14px}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}}
-[hidden]{display:none!important}
-.played .lead{left:30px;top:0;transform:rotate(-4deg)}.played .second{right:0;top:42px;transform:rotate(7deg)}
-</style>
-</head>
-<body>
-<header><a class="wordmark" href="#" aria-label="Euchre study home">euchre</a><div class="study-label">TABLE STUDY / CLARITY & TRADITION</div></header>
-<main>
-<section class="intro"><h1>A familiar table</h1><p>The game supplies the character. The interface keeps it clear.</p></section>
-<section class="game" aria-label="Euchre table design prototype">
-<aside class="scoreboard" aria-label="Game score">
- <h2 class="section-label">First to 10</h2><p class="subtle">Keeping score<br>with the fives.</p>
- <div class="score-teams"><section><div class="team-heading"><h3>Us</h3><div class="score-digit">7</div></div><div class="score-stack" role="img" aria-label="Our score is seven: five exposed pips on the top five and two on the lower five." id="our-fives"></div><p class="score-caption">You + Maya</p></section><section><div class="team-heading"><h3>Them</h3><div class="score-digit">2</div></div><div class="score-stack" role="img" aria-label="Their score is two: two exposed pips on the lower five; the covering five is face down." id="their-fives"></div><p class="score-caption">Theo + Alex</p></section></div>
- <details class="score-help"><summary>How the fives work</summary><p>Count the exposed pips. Below five, one card covers the other face down. At five, turn it face up. Our seven shows five plus two; their two shows just two. The numeral beside each team gives a quick check.</p></details>
-</aside>
-<div class="play-area">
- <div class="hand-meta"><span>Hand 7 · Trick 3 of 5</span><span class="trump">Trump <span class="red-suit">♥</span> Hearts</span></div>
- <div class="table-stage">
-  <div class="felt"><div class="table-note">Maya led hearts</div><div class="played" id="played"></div><div class="trick-progress" id="trick-progress">2 of 4 cards played</div></div>
-  <div class="seat north"><div class="name">Maya</div><div class="role">Your partner · Led</div><div class="backs" aria-label="Maya has two cards left"><i></i><i></i></div></div>
-  <div class="seat west"><div class="backs" aria-label="Theo has three cards left"><i></i><i></i><i></i></div><div class="name">Theo</div><div class="role">Opponent</div></div>
-  <div class="seat east"><div class="backs" aria-label="Alex has two cards left"><i></i><i></i></div><div class="name">Alex <span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span></div><div class="role">Dealer</div></div>
-  <div class="seat south"><div class="name">You</div><div class="role" id="seat-status">Your turn</div></div>
- </div>
- <div class="your-hand"><h2 id="turn-heading">Your turn</h2><p id="instruction">Follow hearts. Choose a card to play.</p><div class="hand-cards" id="hand"></div><button class="play-button" id="play" disabled>Choose a card</button><p class="hand-status" id="status" aria-live="polite"></p><button class="reset" id="reset" hidden>Reset this example</button></div>
-</div>
-<aside class="game-info" aria-label="Current hand information">
- <section><h2 class="section-label">This hand</h2><div class="trump-heading"><span class="red-suit">♥</span> Hearts</div><p class="call-note">You ordered Alex up.<br>Your team called trump.</p><div class="makers">Us: makers · Them: defenders</div></section>
- <section class="tricks"><h2 class="section-label">Tricks taken</h2><div class="trick-row"><span>Us</span><div class="won-tricks"><div class="packet" aria-hidden="true"></div><span>1</span></div></div><div class="trick-row"><span>Them</span><div class="won-tricks"><div class="packet" aria-hidden="true"></div><span>1</span></div></div><p class="subtle">We need 3 to make it.<br>They need 3 to euchre us.</p></section>
- <details class="bowers"><summary>The bowers this hand</summary><p><span class="red-suit">J♥</span> is the right bower: the highest trump.<br><span class="red-suit">J♦</span> is the left bower: the second-highest trump. It counts as a heart, not a diamond.</p></details>
-</aside>
-</section>
-<section class="design-note"><h2>Clear, without losing the game</h2><p><strong>Real scoring fives, a dealer chip, and stacks of won tricks.</strong> These are useful parts of the interface, not background decoration. Scores also have numerals; trump also has a name; your partner and the makers are explicit. Cards stay familiar. Guidance explains the current decision, with the bower rule one click away.</p><p class="prototype-note">Interactive design study: select a heart, then confirm the play. This demonstrates one turn, not a complete game. The score is a fixed example. Font falls back to Arial when offline.</p></section>
-</main>
-<script>
-const five=(suit,classes='')=>`<div class="five ${classes}" aria-hidden="true"><span class="five-index">5</span><span class="five-index bottom">5</span><span class="pip tl">${suit}</span><span class="pip tr">${suit}</span><span class="pip center">${suit}</span><span class="pip bl">${suit}</span><span class="pip br">${suit}</span></div>`;
-document.getElementById('our-fives').innerHTML=five('♣')+five('♥','red cover');
-document.getElementById('their-fives').innerHTML=five('♠')+'<div class="five back cover" aria-hidden="true"></div>';
-const face=(rank,suit,classes='')=>`<span class="playing-card ${suit==='♥'?'red':''} ${classes}" aria-hidden="true"><span class="corner">${rank}<small>${suit}</small></span><span class="center-suit">${suit}</span><span class="corner bottom">${rank}<small>${suit}</small></span></span>`;
-const options=[{rank:'J',suit:'♥',name:'Jack of hearts',hint:'Right bower',legal:true},{rank:'K',suit:'♥',name:'King of hearts',hint:'Trump',legal:true},{rank:'A',suit:'♣',name:'Ace of clubs',hint:'Must follow hearts',legal:false}];
-const hand=document.getElementById('hand'),play=document.getElementById('play'),played=document.getElementById('played'),status=document.getElementById('status'),reset=document.getElementById('reset');
-let selected=null;
-function initialize(){selected=null;played.classList.remove('after-play');played.innerHTML=face('Q','♥','lead')+face('A','♥','second');hand.innerHTML=options.map((card,i)=>`<button class="hand-card" data-index="${i}" aria-label="${card.name}. ${card.hint}" aria-pressed="false" ${card.legal?'':'disabled'}>${face(card.rank,card.suit)}<div class="card-label">${card.hint}</div></button>`).join('');play.disabled=true;play.textContent='Choose a card';play.hidden=false;reset.hidden=true;status.textContent='';document.getElementById('turn-heading').textContent='Your turn';document.getElementById('instruction').textContent='Follow hearts. Choose a card to play.';document.getElementById('seat-status').textContent='Your turn';document.getElementById('trick-progress').textContent='2 of 4 cards played'}
-hand.addEventListener('click',event=>{const button=event.target.closest('button');if(!button||button.disabled)return;selected=Number(button.dataset.index);for(const item of hand.querySelectorAll('button'))item.setAttribute('aria-pressed',String(item===button));play.disabled=false;play.textContent=`Play ${options[selected].rank}${options[selected].suit}`;status.textContent=`${options[selected].name} selected.`});
-play.addEventListener('click',()=>{if(selected===null)return;const card=options[selected];played.insertAdjacentHTML('beforeend',face(card.rank,card.suit,'selected-card'));played.classList.add('after-play');hand.querySelector(`[data-index="${selected}"]`).outerHTML='<div class="empty-hand-slot">Played</div>';for(const button of hand.querySelectorAll('button'))button.disabled=true;document.getElementById('turn-heading').textContent='Card played';document.getElementById('instruction').textContent='End of this example.';document.getElementById('seat-status').textContent='Played';document.getElementById('trick-progress').textContent='3 of 4 cards played';status.textContent=`You played the ${card.name.toLowerCase()}.`;play.hidden=true;reset.hidden=false;reset.focus()});
-reset.addEventListener('click',()=>{initialize();hand.querySelector('button').focus()});
-initialize();
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Euchre — A familiar table</title>
+    <style>
+      @font-face {
+        font-family: InterVariable;
+        font-style: normal;
+        font-weight: 100 900;
+        font-display: swap;
+        src: url('https://rsms.me/inter/font-files/InterVariable.woff2') format('woff2');
+      }
+      :root {
+        --paper: #f8f6ef;
+        --ink: #252b25;
+        --muted: #62695e;
+        --felt: #315e4b;
+        --red: #b33132;
+        --line: #252b2526;
+        --card: #fffdf6;
+        --action: #25533e;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          14px InterVariable,
+          Arial,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01', 'ss03';
+        font-variant-numeric: tabular-nums;
+      }
+      button {
+        font: inherit;
+      }
+      a {
+        color: inherit;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid #b15327;
+        outline-offset: 4px;
+      }
+      button {
+        cursor: pointer;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1,
+      h2,
+      h3 {
+        font-weight: 600;
+        text-wrap: balance;
+      }
+      p {
+        text-wrap: pretty;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding: 18px 36px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+      }
+      .wordmark {
+        font-family: Georgia, serif;
+        font-size: 26px;
+        letter-spacing: -1px;
+        text-decoration: none;
+      }
+      .study-label {
+        font: 11px monospace;
+        letter-spacing: 1px;
+        color: var(--muted);
+      }
+      main {
+        max-width: 1440px;
+        margin: auto;
+        isolation: isolate;
+      }
+      .intro {
+        padding: 30px 36px 26px;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 24px;
+      }
+      .intro h1 {
+        font-size: 24px;
+        letter-spacing: -0.7px;
+      }
+      .intro p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .game {
+        display: grid;
+        grid-template-columns: 225px minmax(0, 1fr) 205px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        margin: 0 36px;
+      }
+      .scoreboard {
+        padding: 26px 25px 26px 0;
+        border-right: 1px solid var(--line);
+      }
+      .section-label {
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 7px;
+      }
+      .subtle {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .score-teams {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        margin-top: 23px;
+      }
+      .team-heading {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .team-heading h3 {
+        font-size: 15px;
+      }
+      .score-digit {
+        font-size: 23px;
+        font-weight: 500;
+      }
+      .score-stack {
+        position: relative;
+        width: 98px;
+        height: 164px;
+        margin: 9px auto 8px;
+      }
+      .five {
+        position: absolute;
+        width: 94px;
+        height: 124px;
+        border: 1px solid #252b2530;
+        border-radius: 5px;
+        background: var(--card);
+        box-shadow: 0 2px 4px #252b2510;
+        color: var(--ink);
+        font-family: Georgia, serif;
+      }
+      .five.red {
+        color: var(--red);
+      }
+      .five.cover {
+        top: 39px;
+        transform: rotate(3deg);
+        transform-origin: center;
+      }
+      .five.back {
+        background-color: #fbf8ed;
+        background-image: repeating-linear-gradient(
+          45deg,
+          transparent,
+          transparent 3px,
+          #486a5a 3px,
+          #486a5a 4px
+        );
+        border: 5px solid var(--card);
+        outline: 1px solid #252b2530;
+      }
+      .five.back:after {
+        content: '♣';
+        position: absolute;
+        inset: 31px 19px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: #fbf8ed;
+        border: 1px solid #486a5a;
+        color: #486a5a;
+        font-size: 21px;
+      }
+      .five-index {
+        position: absolute;
+        top: 4px;
+        left: 5px;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .five-index.bottom {
+        top: auto;
+        left: auto;
+        right: 5px;
+        bottom: 4px;
+        transform: rotate(180deg);
+      }
+      .pip {
+        position: absolute;
+        font-size: 24px;
+        line-height: 1;
+      }
+      .pip.tl {
+        left: 20px;
+        top: 14px;
+      }
+      .pip.tr {
+        right: 17px;
+        top: 14px;
+      }
+      .pip.center {
+        top: 49px;
+        left: 37px;
+      }
+      .pip.bl {
+        left: 20px;
+        bottom: 14px;
+        transform: rotate(180deg);
+      }
+      .pip.br {
+        right: 17px;
+        bottom: 14px;
+        transform: rotate(180deg);
+      }
+      .score-caption {
+        font-size: 11px;
+        color: var(--muted);
+        text-align: center;
+      }
+      .score-help {
+        margin-top: 22px;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .score-help summary {
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .score-help p {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+      .play-area {
+        padding: 21px 20px 25px;
+        min-width: 0;
+      }
+      .hand-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .trump {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .red-suit {
+        color: var(--red);
+      }
+      .table-stage {
+        position: relative;
+        width: 100%;
+        max-width: 560px;
+        aspect-ratio: 1;
+        margin: 8px auto 0;
+      }
+      .felt {
+        position: absolute;
+        width: 74%;
+        aspect-ratio: 1;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: var(--felt);
+        border: 8px solid #8e7758;
+        outline: 1px solid #65553e;
+        box-shadow: inset 0 0 0 1px #ffffff28;
+      }
+      .felt:before {
+        content: '';
+        position: absolute;
+        inset: 12px;
+        border: 1px solid #ffffff25;
+        border-radius: 50%;
+      }
+      .seat {
+        position: absolute;
+        z-index: 2;
+        text-align: center;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .seat .name {
+        font-weight: 600;
+      }
+      .seat .role {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .north {
+        top: 1%;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .south {
+        bottom: 1%;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .west {
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .east {
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .dealer-chip {
+        width: 23px;
+        height: 23px;
+        display: inline-grid;
+        place-items: center;
+        border: 1px solid #a88e5e;
+        background: #f0e0b9;
+        border-radius: 50%;
+        font:
+          11px Georgia,
+          serif;
+        margin-left: 4px;
+        vertical-align: middle;
+      }
+      .seat.south {
+        border-bottom: 2px solid var(--action);
+        padding-bottom: 6px;
+      }
+      .backs {
+        display: flex;
+        justify-content: center;
+        margin-top: 8px;
+        gap: 3px;
+      }
+      .backs i {
+        display: block;
+        width: 14px;
+        height: 21px;
+        background: repeating-linear-gradient(
+          45deg,
+          #486a5a,
+          #486a5a 2px,
+          #f8f6ef 2px,
+          #f8f6ef 3px
+        );
+        border: 2px solid var(--paper);
+        outline: 1px solid var(--line);
+        border-radius: 2px;
+      }
+      .west .backs,
+      .east .backs {
+        margin-bottom: 7px;
+      }
+      .table-note {
+        position: absolute;
+        top: 18%;
+        left: 0;
+        right: 0;
+        text-align: center;
+        color: #e1ece3;
+        font-size: 11px;
+      }
+      .played {
+        position: absolute;
+        width: 174px;
+        height: 156px;
+        left: 50%;
+        top: 52%;
+        transform: translate(-50%, -50%);
+      }
+      .playing-card {
+        background: var(--card);
+        border: 1px solid #252b2526;
+        border-radius: 7px;
+        width: 75px;
+        height: 107px;
+        position: relative;
+        box-shadow: 0 3px 5px #17251b16;
+        color: var(--ink);
+        font-family: Georgia, serif;
+        display: block;
+      }
+      .playing-card.red {
+        color: var(--red);
+      }
+      .corner {
+        position: absolute;
+        top: 7px;
+        left: 7px;
+        font-size: 21px;
+        line-height: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+      }
+      .corner small {
+        font-size: 15px;
+      }
+      .corner.bottom {
+        top: auto;
+        left: auto;
+        bottom: 7px;
+        right: 7px;
+        transform: rotate(180deg);
+      }
+      .center-suit {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-size: 34px;
+      }
+      .played .playing-card {
+        position: absolute;
+      }
+      .played .lead {
+        left: 0;
+        top: 42px;
+        transform: rotate(-7deg);
+      }
+      .played .second {
+        right: 10px;
+        top: 0;
+        transform: rotate(4deg);
+      }
+      .lead-label {
+        position: absolute;
+        bottom: -14px;
+        left: 1px;
+        color: #e1ece3;
+        font-family: InterVariable, Arial, sans-serif;
+        font-size: 10px;
+        white-space: nowrap;
+      }
+      .trick-progress {
+        position: absolute;
+        bottom: 14%;
+        left: 0;
+        right: 0;
+        text-align: center;
+        color: #e1ece3;
+        font-size: 11px;
+      }
+      .your-hand {
+        text-align: center;
+        margin-top: 2px;
+      }
+      .your-hand h2 {
+        font-size: 19px;
+        letter-spacing: -0.3px;
+      }
+      .your-hand p {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+      .hand-cards {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 10px;
+        margin-top: 22px;
+        min-height: 143px;
+      }
+      .hand-card {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        position: relative;
+        text-align: initial;
+        transition: transform 140ms ease-out;
+      }
+      .hand-card .playing-card {
+        width: 83px;
+        height: 116px;
+      }
+      .hand-card[aria-pressed='true'] {
+        transform: translateY(-10px);
+      }
+      .hand-card[aria-pressed='true'] .playing-card {
+        outline: 3px solid var(--action);
+        outline-offset: 3px;
+      }
+      .hand-card:disabled {
+        cursor: not-allowed;
+      }
+      .hand-card:disabled .playing-card {
+        background: #eae8de;
+        box-shadow: none;
+      }
+      .card-label {
+        text-align: center;
+        margin-top: 10px;
+        font-size: 10px;
+        color: var(--muted);
+        font-family: InterVariable, Arial, sans-serif;
+      }
+      .play-button {
+        margin-top: 12px;
+        background: var(--action);
+        color: white;
+        border: 1px solid var(--action);
+        border-radius: 5px;
+        min-height: 38px;
+        padding: 8px 18px;
+        font-weight: 500;
+        min-width: 190px;
+      }
+      .play-button:hover {
+        background: #193e2c;
+      }
+      .play-button:disabled {
+        background: #dce3da;
+        border-color: #dce3da;
+        color: #485b4a;
+        cursor: default;
+      }
+      .game-info {
+        border-left: 1px solid var(--line);
+        padding: 26px 0 26px 25px;
+      }
+      .trump-heading {
+        font-family: Georgia, serif;
+        font-size: 25px;
+        margin: 12px 0 8px;
+      }
+      .call-note {
+        font-size: 13px;
+        line-height: 1.65;
+        color: var(--muted);
+      }
+      .makers {
+        font-size: 12px;
+        margin-top: 15px;
+        padding: 9px 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .tricks {
+        margin-top: 34px;
+      }
+      .trick-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 19px;
+        font-size: 12px;
+      }
+      .won-tricks {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .packet {
+        position: relative;
+        width: 28px;
+        height: 39px;
+        background: #fbf8ed;
+        border: 2px solid #fbf8ed;
+        border-radius: 2px;
+        outline: 1px solid #252b2530;
+        box-shadow:
+          2px 2px 0 #e4ded0,
+          3px 3px 0 #252b2540;
+        background-image: repeating-linear-gradient(
+          45deg,
+          #486a5a,
+          #486a5a 2px,
+          #fbf8ed 2px,
+          #fbf8ed 3px
+        );
+        transform: rotate(-5deg);
+      }
+      .tricks .subtle {
+        margin-top: 18px;
+      }
+      .bowers {
+        margin-top: 36px;
+        border-top: 1px solid var(--line);
+        padding-top: 19px;
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .bowers summary {
+        cursor: pointer;
+        font-weight: 500;
+      }
+      .bowers p {
+        color: var(--muted);
+        margin-top: 8px;
+      }
+      .design-note {
+        max-width: 1050px;
+        padding: 30px 36px 45px;
+        line-height: 1.7;
+      }
+      .design-note h2 {
+        font-size: 18px;
+        letter-spacing: -0.3px;
+        margin-bottom: 8px;
+      }
+      .design-note p {
+        color: var(--muted);
+      }
+      .design-note strong {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .design-note .prototype-note {
+        font-size: 12px;
+        margin-top: 12px;
+      }
+      .hand-status {
+        min-height: 18px;
+      }
+      .selected-card {
+        display: none;
+      }
+      .played .selected-card {
+        display: block;
+        top: 96px;
+        left: 57px;
+        transform: rotate(2deg);
+      }
+      .played.after-play {
+        top: 47%;
+      }
+      .played.after-play .lead-label {
+        display: none;
+      }
+      .empty-hand-slot {
+        width: 83px;
+        height: 116px;
+        display: grid;
+        place-items: center;
+        border: 1px dashed var(--line);
+        border-radius: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .reset {
+        display: block;
+        margin: 10px auto 0;
+        background: none;
+        border: 0;
+        min-height: 32px;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        color: var(--muted);
+      }
+      @media (hover: hover) {
+        .hand-card:not(:disabled):hover {
+          transform: translateY(-7px);
+        }
+        .hand-card[aria-pressed='true']:hover {
+          transform: translateY(-10px);
+        }
+      }
+      @media (max-width: 1100px) {
+        .game {
+          grid-template-columns: 160px minmax(0, 1fr) 165px;
+          margin: 0 24px;
+        }
+        .scoreboard {
+          padding-right: 16px;
+        }
+        .game-info {
+          padding-left: 16px;
+        }
+        .play-area {
+          padding-left: 12px;
+          padding-right: 12px;
+        }
+        .seat {
+          font-size: 12px;
+        }
+        .table-stage {
+          min-height: 360px;
+          aspect-ratio: 1;
+        }
+        .felt {
+          width: 76%;
+          max-width: 360px;
+        }
+        .intro {
+          padding-left: 24px;
+          padding-right: 24px;
+        }
+        .intro p {
+          max-width: 300px;
+          line-height: 1.6;
+        }
+        .played {
+          transform: translate(-50%, -50%) scale(0.85);
+        }
+        .table-note {
+          top: 15%;
+          font-size: 10px;
+        }
+        .trick-progress {
+          bottom: 12%;
+          font-size: 10px;
+        }
+        .north {
+          top: 0;
+        }
+        .south {
+          bottom: 0;
+        }
+        .seat .role {
+          font-size: 9px;
+        }
+        .west {
+          left: -3px;
+        }
+        .east {
+          right: -3px;
+        }
+        .seat .backs {
+          gap: 2px;
+        }
+        .backs i {
+          width: 11px;
+          height: 17px;
+        }
+      }
+      @media (max-width: 800px) {
+        header {
+          padding: 16px 20px;
+        }
+        .study-label {
+          font-size: 9px;
+        }
+        .intro {
+          padding: 23px 20px;
+          display: block;
+        }
+        .intro h1 {
+          font-size: 22px;
+        }
+        .intro p {
+          max-width: none;
+          margin-top: 9px;
+          font-size: 16px;
+        }
+        .game {
+          margin: 0 20px;
+          grid-template-columns: 1fr;
+        }
+        .scoreboard {
+          padding: 20px 0 18px;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          display: grid;
+          grid-template-columns: 1fr 2fr;
+          gap: 0 20px;
+        }
+        .scoreboard > .section-label {
+          font-size: 16px;
+        }
+        .scoreboard > .subtle {
+          grid-column: 1;
+          align-self: start;
+          font-size: 13px;
+        }
+        .score-teams {
+          grid-column: 2;
+          grid-row: 1/4;
+          display: flex;
+          flex-direction: row;
+          justify-content: space-evenly;
+          margin: 0;
+          gap: 20px;
+        }
+        .team-heading {
+          gap: 12px;
+        }
+        .team-heading h3 {
+          font-size: 14px;
+        }
+        .score-stack {
+          width: 62px;
+          height: 106px;
+          margin-top: 7px;
+          margin-bottom: 2px;
+        }
+        .score-stack .five {
+          transform: scale(0.64);
+          transform-origin: top left;
+        }
+        .score-stack .five.cover {
+          top: 25px;
+          transform: scale(0.64) rotate(3deg);
+        }
+        .score-caption {
+          font-size: 10px;
+        }
+        .score-digit {
+          font-size: 21px;
+        }
+        .score-help {
+          font-size: 13px;
+          margin-top: 10px;
+          max-width: 200px;
+        }
+        .play-area {
+          padding: 20px 0 25px;
+        }
+        .hand-meta {
+          font-size: 13px;
+        }
+        .table-stage {
+          max-width: 540px;
+          min-height: 0;
+          aspect-ratio: 1;
+        }
+        .felt {
+          width: 74%;
+          max-width: none;
+        }
+        .played {
+          transform: translate(-50%, -50%);
+        }
+        .north {
+          top: 1%;
+        }
+        .south {
+          bottom: 1%;
+        }
+        .game-info {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+          padding: 20px 0;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 22px;
+        }
+        .tricks {
+          margin: 0;
+        }
+        .bowers {
+          grid-column: 1/-1;
+          margin: 0;
+          font-size: 16px;
+        }
+        .game-info .section-label {
+          font-size: 16px;
+        }
+        .call-note {
+          font-size: 16px;
+        }
+        .tricks .subtle {
+          font-size: 14px;
+        }
+        .trick-row {
+          font-size: 14px;
+        }
+        .your-hand h2 {
+          font-size: 22px;
+        }
+        .your-hand p {
+          font-size: 16px;
+        }
+        .play-button {
+          min-height: 46px;
+          font-size: 16px;
+        }
+        .design-note {
+          padding: 26px 20px 36px;
+          font-size: 16px;
+        }
+        .design-note .prototype-note {
+          font-size: 14px;
+        }
+        .seat {
+          font-size: 13px;
+        }
+        .seat .role {
+          font-size: 10px;
+        }
+        .seat .backs {
+          gap: 3px;
+        }
+        .backs i {
+          width: 14px;
+          height: 21px;
+        }
+        .table-note {
+          top: 18%;
+        }
+        .trick-progress {
+          bottom: 14%;
+        }
+      }
+      @media (max-width: 440px) {
+        .game {
+          margin: 0 14px;
+        }
+        .scoreboard {
+          grid-template-columns: 1fr 1.7fr;
+          gap: 0 10px;
+        }
+        .score-teams {
+          gap: 12px;
+        }
+        .team-heading {
+          gap: 5px;
+        }
+        .team-heading h3 {
+          font-size: 13px;
+        }
+        .score-help {
+          font-size: 12px;
+        }
+        .score-stack {
+          margin-left: 5px;
+          margin-right: 5px;
+        }
+        .score-caption {
+          font-size: 9px;
+        }
+        .felt {
+          width: 72%;
+          border-width: 6px;
+        }
+        .felt:before {
+          inset: 8px;
+        }
+        .seat {
+          font-size: 12px;
+        }
+        .seat .role {
+          font-size: 9px;
+        }
+        .backs i {
+          width: 10px;
+          height: 15px;
+          border-width: 1px;
+        }
+        .backs {
+          margin-top: 5px;
+        }
+        .west {
+          left: 0;
+        }
+        .east {
+          right: 0;
+        }
+        .dealer-chip {
+          width: 19px;
+          height: 19px;
+          font-size: 9px;
+          margin-left: 1px;
+        }
+        .played {
+          transform: translate(-50%, -50%) scale(0.7);
+          top: 52%;
+        }
+        .table-note {
+          top: 14%;
+          font-size: 9px;
+        }
+        .trick-progress {
+          bottom: 11%;
+          font-size: 9px;
+        }
+        .north {
+          top: 0;
+        }
+        .south {
+          bottom: 0;
+          padding-bottom: 3px !important;
+        }
+        .your-hand {
+          margin-top: 18px;
+        }
+        .hand-cards {
+          gap: 12px;
+        }
+        .hand-card .playing-card {
+          width: 79px;
+          height: 111px;
+        }
+        .game-info {
+          gap: 17px;
+        }
+        .won-tricks {
+          gap: 6px;
+        }
+        .trump-heading {
+          font-size: 23px;
+        }
+        .call-note {
+          font-size: 14px;
+        }
+        .tricks .subtle {
+          font-size: 13px;
+        }
+        .trick-row {
+          font-size: 13px;
+        }
+        .packet {
+          width: 23px;
+          height: 32px;
+        }
+        .hand-meta {
+          font-size: 12px;
+        }
+        .study-label {
+          font-size: 8px;
+          max-width: 130px;
+          text-align: right;
+        }
+        .design-note {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .played .lead {
+        left: 30px;
+        top: 0;
+        transform: rotate(-4deg);
+      }
+      .played .second {
+        right: 0;
+        top: 42px;
+        transform: rotate(7deg);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="wordmark" href="#" aria-label="Euchre study home">euchre</a>
+      <div class="study-label">TABLE STUDY / CLARITY & TRADITION</div>
+    </header>
+    <main>
+      <section class="intro">
+        <h1>A familiar table</h1>
+        <p>The game supplies the character. The interface keeps it clear.</p>
+      </section>
+      <section class="game" aria-label="Euchre table design prototype">
+        <aside class="scoreboard" aria-label="Game score">
+          <h2 class="section-label">First to 10</h2>
+          <p class="subtle">Keeping score<br />with the fives.</p>
+          <div class="score-teams">
+            <section>
+              <div class="team-heading">
+                <h3>Us</h3>
+                <div class="score-digit">7</div>
+              </div>
+              <div
+                class="score-stack"
+                role="img"
+                aria-label="Our score is seven: five exposed pips on the top five and two on the lower five."
+                id="our-fives"
+              ></div>
+              <p class="score-caption">You + Maya</p>
+            </section>
+            <section>
+              <div class="team-heading">
+                <h3>Them</h3>
+                <div class="score-digit">2</div>
+              </div>
+              <div
+                class="score-stack"
+                role="img"
+                aria-label="Their score is two: two exposed pips on the lower five; the covering five is face down."
+                id="their-fives"
+              ></div>
+              <p class="score-caption">Theo + Alex</p>
+            </section>
+          </div>
+          <details class="score-help">
+            <summary>How the fives work</summary>
+            <p>
+              Count the exposed pips. Below five, one card covers the other face down. At five, turn
+              it face up. Our seven shows five plus two; their two shows just two. The numeral
+              beside each team gives a quick check.
+            </p>
+          </details>
+        </aside>
+        <div class="play-area">
+          <div class="hand-meta">
+            <span>Hand 7 · Trick 3 of 5</span
+            ><span class="trump">Trump <span class="red-suit">♥</span> Hearts</span>
+          </div>
+          <div class="table-stage">
+            <div class="felt">
+              <div class="table-note">Maya led hearts</div>
+              <div class="played" id="played"></div>
+              <div class="trick-progress" id="trick-progress">2 of 4 cards played</div>
+            </div>
+            <div class="seat north">
+              <div class="name">Maya</div>
+              <div class="role">Your partner · Led</div>
+              <div class="backs" aria-label="Maya has two cards left"><i></i><i></i></div>
+            </div>
+            <div class="seat west">
+              <div class="backs" aria-label="Theo has three cards left"><i></i><i></i><i></i></div>
+              <div class="name">Theo</div>
+              <div class="role">Opponent</div>
+            </div>
+            <div class="seat east">
+              <div class="backs" aria-label="Alex has two cards left"><i></i><i></i></div>
+              <div class="name">
+                Alex <span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span>
+              </div>
+              <div class="role">Dealer</div>
+            </div>
+            <div class="seat south">
+              <div class="name">You</div>
+              <div class="role" id="seat-status">Your turn</div>
+            </div>
+          </div>
+          <div class="your-hand">
+            <h2 id="turn-heading">Your turn</h2>
+            <p id="instruction">Follow hearts. Choose a card to play.</p>
+            <div class="hand-cards" id="hand"></div>
+            <button class="play-button" id="play" disabled>Choose a card</button>
+            <p class="hand-status" id="status" aria-live="polite"></p>
+            <button class="reset" id="reset" hidden>Reset this example</button>
+          </div>
+        </div>
+        <aside class="game-info" aria-label="Current hand information">
+          <section>
+            <h2 class="section-label">This hand</h2>
+            <div class="trump-heading"><span class="red-suit">♥</span> Hearts</div>
+            <p class="call-note">You ordered Alex up.<br />Your team called trump.</p>
+            <div class="makers">Us: makers · Them: defenders</div>
+          </section>
+          <section class="tricks">
+            <h2 class="section-label">Tricks taken</h2>
+            <div class="trick-row">
+              <span>Us</span>
+              <div class="won-tricks">
+                <div class="packet" aria-hidden="true"></div>
+                <span>1</span>
+              </div>
+            </div>
+            <div class="trick-row">
+              <span>Them</span>
+              <div class="won-tricks">
+                <div class="packet" aria-hidden="true"></div>
+                <span>1</span>
+              </div>
+            </div>
+            <p class="subtle">We need 3 to make it.<br />They need 3 to euchre us.</p>
+          </section>
+          <details class="bowers">
+            <summary>The bowers this hand</summary>
+            <p>
+              <span class="red-suit">J♥</span> is the right bower: the highest trump.<br /><span
+                class="red-suit"
+                >J♦</span
+              >
+              is the left bower: the second-highest trump. It counts as a heart, not a diamond.
+            </p>
+          </details>
+        </aside>
+      </section>
+      <section class="design-note">
+        <h2>Clear, without losing the game</h2>
+        <p>
+          <strong>Real scoring fives, a dealer chip, and stacks of won tricks.</strong> These are
+          useful parts of the interface, not background decoration. Scores also have numerals; trump
+          also has a name; your partner and the makers are explicit. Cards stay familiar. Guidance
+          explains the current decision, with the bower rule one click away.
+        </p>
+        <p class="prototype-note">
+          Interactive design study: select a heart, then confirm the play. This demonstrates one
+          turn, not a complete game. The score is a fixed example. Font falls back to Arial when
+          offline.
+        </p>
+      </section>
+    </main>
+    <script>
+      const five = (suit, classes = '') =>
+        `<div class="five ${classes}" aria-hidden="true"><span class="five-index">5</span><span class="five-index bottom">5</span><span class="pip tl">${suit}</span><span class="pip tr">${suit}</span><span class="pip center">${suit}</span><span class="pip bl">${suit}</span><span class="pip br">${suit}</span></div>`
+      document.getElementById('our-fives').innerHTML = five('♣') + five('♥', 'red cover')
+      document.getElementById('their-fives').innerHTML =
+        five('♠') + '<div class="five back cover" aria-hidden="true"></div>'
+      const face = (rank, suit, classes = '') =>
+        `<span class="playing-card ${suit === '♥' ? 'red' : ''} ${classes}" aria-hidden="true"><span class="corner">${rank}<small>${suit}</small></span><span class="center-suit">${suit}</span><span class="corner bottom">${rank}<small>${suit}</small></span></span>`
+      const options = [
+        { rank: 'J', suit: '♥', name: 'Jack of hearts', hint: 'Right bower', legal: true },
+        { rank: 'K', suit: '♥', name: 'King of hearts', hint: 'Trump', legal: true },
+        { rank: 'A', suit: '♣', name: 'Ace of clubs', hint: 'Must follow hearts', legal: false },
+      ]
+      const hand = document.getElementById('hand'),
+        play = document.getElementById('play'),
+        played = document.getElementById('played'),
+        status = document.getElementById('status'),
+        reset = document.getElementById('reset')
+      let selected = null
+      function initialize() {
+        selected = null
+        played.classList.remove('after-play')
+        played.innerHTML = face('Q', '♥', 'lead') + face('A', '♥', 'second')
+        hand.innerHTML = options
+          .map(
+            (card, i) =>
+              `<button class="hand-card" data-index="${i}" aria-label="${card.name}. ${card.hint}" aria-pressed="false" ${card.legal ? '' : 'disabled'}>${face(card.rank, card.suit)}<div class="card-label">${card.hint}</div></button>`,
+          )
+          .join('')
+        play.disabled = true
+        play.textContent = 'Choose a card'
+        play.hidden = false
+        reset.hidden = true
+        status.textContent = ''
+        document.getElementById('turn-heading').textContent = 'Your turn'
+        document.getElementById('instruction').textContent = 'Follow hearts. Choose a card to play.'
+        document.getElementById('seat-status').textContent = 'Your turn'
+        document.getElementById('trick-progress').textContent = '2 of 4 cards played'
+      }
+      hand.addEventListener('click', (event) => {
+        const button = event.target.closest('button')
+        if (!button || button.disabled) return
+        selected = Number(button.dataset.index)
+        for (const item of hand.querySelectorAll('button'))
+          item.setAttribute('aria-pressed', String(item === button))
+        play.disabled = false
+        play.textContent = `Play ${options[selected].rank}${options[selected].suit}`
+        status.textContent = `${options[selected].name} selected.`
+      })
+      play.addEventListener('click', () => {
+        if (selected === null) return
+        const card = options[selected]
+        played.insertAdjacentHTML('beforeend', face(card.rank, card.suit, 'selected-card'))
+        played.classList.add('after-play')
+        hand.querySelector(`[data-index="${selected}"]`).outerHTML =
+          '<div class="empty-hand-slot">Played</div>'
+        for (const button of hand.querySelectorAll('button')) button.disabled = true
+        document.getElementById('turn-heading').textContent = 'Card played'
+        document.getElementById('instruction').textContent = 'End of this example.'
+        document.getElementById('seat-status').textContent = 'Played'
+        document.getElementById('trick-progress').textContent = '3 of 4 cards played'
+        status.textContent = `You played the ${card.name.toLowerCase()}.`
+        play.hidden = true
+        reset.hidden = false
+        reset.focus()
+      })
+      reset.addEventListener('click', () => {
+        initialize()
+        hand.querySelector('button').focus()
+      })
+      initialize()
+    </script>
+  </body>
 </html>
